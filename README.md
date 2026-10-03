@@ -2,63 +2,62 @@
 
 *Words into worlds.*
 
-一个本地运行的英语学习空间。通过 Codex CLI 寻找单词和真实英文文章，在阅读、提问与复习中积累自己的学习记录。
+在感兴趣的文章里学英语。用 Codex 寻找单词和真实英文文章，边读边问，让每次学习都有迹可循。
+
+[快速开始](#快速开始) · [使用指南](docs/usage.md) · [模型与配置](docs/configuration.md)
+
+![句。间阅读界面：左侧英文原文，右侧句子讲解与提问](docs/images/reading-preview.jpg)
+
+*阅读界面预览，文章与讲解均为示例内容。*
+
+## 一点积累，自成语感
+
+| 从这里开始 | 可以做什么 |
+| --- | --- |
+| **选材** | 写下想学的方向，按数量、参考难度和主题筛选单词与文章，分别送入词表和书架。 |
+| **单词** | 卡片、拼写与间隔复习；收藏生词，搜索词表，循序巩固。 |
+| **阅读** | 左侧读原文，右侧结合全文和选中句子讲解；翻译、提问、理解测试与批改。也可导入自己的文章。 |
+| **积累** | 用 Daily / Weekly 学习足迹回看进度，让学习记忆帮助推荐下次的方向。 |
+
+在「设置」中获取可用模型，分别调整检索与阅读助手的 Effort / Fast。阅读助手也支持自定义 OpenAI 兼容 API。
 
 ## 快速开始
 
-需要 **Node.js 22.13+（推荐 24）**、npm，以及已安装并登录的 Codex CLI。单词和文章检索使用 Codex；阅读助手也可接入自定义 API。
-
-首次获取并启动：
+需要 **Node.js 22.13+（推荐 24）** 和 npm。
 
 ```sh
 git clone https://github.com/wqq977wqq977-source/between-english.git
 cd between-english
 npm ci
-codex login
 npm start
 ```
 
-打开 [句。间](http://127.0.0.1:4318)。已有本地项目或已登录 Codex 时可跳过对应步骤；终端按 `Ctrl+C` 停止服务。首次使用可在「设置」中获取可用模型。尚未配置 Codex 时，网页仍可启动。
+打开 [http://127.0.0.1:4318](http://127.0.0.1:4318)。终端按 `Ctrl+C` 停止服务。
 
-macOS 也可双击仓库中的 [`start.command`](start.command)，自动启动后台服务并打开网页。桌面 `.app` 不包含在仓库中。其他启动方式见[配置说明](docs/configuration.md#启动方式)。
+**开始检索：** 安装 Codex CLI 后，在另一个终端运行 `codex login`，再到「设置」获取模型。网页可先启动；单词和文章检索需要已登录的 Codex。自定义 API 仅用于阅读助手，配置方式见[自定义 API](docs/configuration.md#自定义-api)。
 
-## 可以做什么
+**macOS：** 也可双击 [`start.command`](start.command)，在后台启动服务并打开网页。更多方式见[启动说明](docs/configuration.md#启动方式)。
 
-| 页面 | 功能 |
-| --- | --- |
-| 选材中心 | 输入学习方向，一次筛选单词和文章，分发到词表与阅读书架；根据学习记忆推荐方向。 |
-| 单词 | 按数量、难度与主题选词；搜索和分页浏览词表；卡片、拼写、生词收藏与间隔复习。 |
-| 阅读 | 筛选真实英文文章或导入正文；划句提问、全文翻译、理解题与批改，助手结合文章上下文回答。 |
-| 我的学习 | Daily / Weekly 学习足迹、连续学习天数与最近内容；单词按周期内学过的不同词数统计。 |
-| 设置 | 获取可用模型，分别配置检索与阅读助手的 Effort / Fast；管理自定义 API 和个人学习记忆。 |
+## 你的学习空间
 
-## 数据与模型
+- 单词、文章与进度保存在本机 SQLite；学习备注和摘要保存在 `memroy.md`，首次启动自动创建。
+- 学习记录和个性化默认开启，可在设置中分别关闭。模型请求会发送任务需要的原文、问题，以及个性化开启时所需的记忆摘要。
+- 检索使用当前 Codex 账户额度；自定义 API 使用对应供应商额度。服务仅监听本机地址，面向个人使用。
 
-学习内容保存在本机 SQLite，个人学习记忆写入 `memroy.md`，首次启动自动创建。数据库、个人记忆、密钥、运行日志和临时文件均排除在 Git 提交之外。
+默认数据目录、记忆、密钥和日志已排除在 Git 提交之外。数据位置、备份和调用边界见[配置说明](docs/configuration.md)。
 
-模型请求需要联网：检索使用当前 Codex 登录账户；阅读助手使用所选 Codex 或 API。相关原文、问题，以及开启个性化后的记忆摘要会随请求发送。服务仅监听本机地址，适合个人使用。
+## 开发
 
-详见[使用指南](docs/usage.md)与[配置、数据和调用边界](docs/configuration.md)。
-
-## 开发与验证
+原生 JavaScript / CSS，Node HTTP / SQLite，无需前端构建。文章提取使用 Readability 与 LinkeDOM。
 
 ```sh
-npm run dev   # 修改后自动重启后端
+npm run dev    # 后端修改后自动重启
 npm run check
 npm test
 ```
 
-前端使用原生 JavaScript / CSS，无需构建；后端使用 Node HTTP / SQLite，文章提取使用 Readability 和 LinkeDOM。测试使用临时数据与替身服务，不需要模型账户。
+测试使用临时数据与替身服务，不需要模型账户。
 
-```text
-public/          页面、样式与交互
-server/          本地 API、模型调用、选材、记忆与数据存储
-scripts/         启动器
-test/            自动化测试
-docs/            使用与配置文档
-start.command    macOS 一键启动
-```
+[开发约定](CONTRIBUTING.md) · [数据保护与问题报告](SECURITY.md)
 
-开发约定与提交检查见 [CONTRIBUTING.md](CONTRIBUTING.md)，数据保护与问题报告见 [SECURITY.md](SECURITY.md)。GitHub Actions 在 Node.js 22 / 24 上执行检查。
-
-本仓库暂未授予开源许可，包标记为 `UNLICENSED`。
+本仓库暂未授予开源许可，标记为 `UNLICENSED`。
