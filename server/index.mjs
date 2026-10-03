@@ -369,7 +369,14 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'POST' && path === '/api/jobs') return send(enqueue(input.type, prepareJob(input.type, input.params || {})), 202);
       if (req.method === 'POST' && /^\/api\/jobs\/[^/]+\/cancel$/.test(path)) {
-        const job = required('job', path.split('/')[3]); if (['queued', 'running'].includes(job.status)) { controllers.get(job.id)?.abort(); store.put('job', { ...job, status: 'cancelled', progress: '', error: '任务已取消。' }); } return send(jobView(store.get(job.id)));
+        const job = required('job', path.split('/')[3]);
+        if (['queued', 'running'].includes(job.status)) {
+          const index = queue.indexOf(job.id);
+          if (index !== -1) { queue.splice(index, 1); executionConfigs.delete(job.id); }
+          controllers.get(job.id)?.abort();
+          store.put('job', { ...job, status: 'cancelled', progress: '', error: '任务已取消。' });
+        }
+        return send(jobView(store.get(job.id)));
       }
       if (req.method === 'POST' && path === '/api/settings') {
         const previous = settings();

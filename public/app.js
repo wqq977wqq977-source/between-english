@@ -353,7 +353,7 @@ let articleRequest=0;
 const readDrafts=new Map();
 function rememberDraft(){if(S.article)readDrafts.set(S.article.id,{compose:S.compose,selection:S.selection,selectionContext:S.selectionContext,assistantTab:S.assistantTab});}
 async function runTask(type,params) {
-  S.error=''; const origin={nav:S.nav,articleId:S.article?.id||'',wordTab:S.wordTab}; const job=await api('/jobs',{type,params});stateRequest++;taskOrigins.set(job.id,origin);S.jobs=[job,...S.jobs.filter(item=>item.id!==job.id)];render();void watchJob(job.id);return job;
+  S.error=''; const origin={nav:S.nav,articleId:S.article?.id||'',wordTab:S.wordTab,deckId:S.deckId||'',request:articleRequest}; const job=await api('/jobs',{type,params});stateRequest++;taskOrigins.set(job.id,origin);S.jobs=[job,...S.jobs.filter(item=>item.id!==job.id)];render();void watchJob(job.id);return job;
 }
 async function watchJob(id) {
   if(polling.has(id))return; polling.add(id);
@@ -371,7 +371,7 @@ async function watchJob(id) {
 }
 async function handleResult(job){
   const r=job.result;
-  const origin=taskOrigins.get(job.id),stillHere=origin&&origin.nav===S.nav&&origin.articleId===(S.article?.id||'')&&origin.wordTab===S.wordTab;
+  const origin=taskOrigins.get(job.id),stillHere=origin&&origin.request===articleRequest&&origin.nav===S.nav&&origin.articleId===(S.article?.id||'')&&origin.wordTab===S.wordTab&&(S.nav!=='words'||origin.deckId===(S.deckId||''));
   if(job.type==='directions')toast('推荐方向已更新');
   if(job.type==='curate'){
     if(r.words?.status==='ready'&&S.nav!=='words')S.deckId=r.words.deckId;
@@ -382,7 +382,10 @@ async function handleResult(job){
   if(job.type==='articles'){S.articleNote=r.note;if(stillHere){S.articleIds=r.articleIds;history.replaceState(null,'','#reading');}toast('文章已放入阅读书架');}
   if(job.type==='open'){if(stillHere)await loadArticle(r.articleId);else toast('文章原文已保存，可从书架打开');}
   if(['explain','quiz','grade'].includes(job.type)){
-    if(S.article?.id===r.articleId){S.article=await api(`/articles/${r.articleId}`);if(job.type!=='explain'){S.assistantTab='quiz';S.quizId=r.quizId;}}
+    if(S.nav==='reading'&&S.article?.id===r.articleId){
+      const request=articleRequest,article=await api(`/articles/${r.articleId}`);
+      if(request===articleRequest&&S.nav==='reading'&&S.article?.id===r.articleId){S.article=article;if(job.type!=='explain'){S.assistantTab='quiz';S.quizId=r.quizId;}}
+    }
     toast(job.type==='grade'?'理解测试已批改':job.type==='quiz'?'题目已准备好':'讲解已保存');
   }
   if(job.type==='word')toast('已加入生词本');
@@ -391,7 +394,7 @@ async function handleResult(job){
 }
 async function loadArticle(id,{recordVisit=true}={}){rememberDraft();const request=++articleRequest;const article=await api(`/articles/${id}`);if(request!==articleRequest)return;S.article=article;if(recordVisit)void api(`/articles/${id}/visit`,{}).catch(e=>toast(e.message));S.nav='reading';Object.assign(S,{selection:'',selectionContext:'',compose:'',assistantTab:'chat'},readDrafts.get(id)||{});history.replaceState(null,'',`#read/${id}`);render();window.scrollTo(0,0);requestAnimationFrame(()=>{const reader=$('.reader'), target=document.getElementById(`para-${article.paragraph||0}`);if(reader){reader.scrollTop=article.paragraph>0&&target?target.getBoundingClientRect().top-reader.getBoundingClientRect().top+reader.scrollTop-24:0;}window.scrollTo(0,0);});}
 async function navigate(nav){rememberDraft();const request=++articleRequest;S.nav=nav;S.error='';if(nav==='reading'){S.article=null;S.articleIds=null;}history.replaceState(null,'',`#${nav}`);render();window.scrollTo(0,0);if(nav==='curate'||nav==='learning'){await refresh();activeJobs().forEach(j=>void watchJob(j.id));if(request===articleRequest&&S.nav===nav)render();}}
-function wordRoute(id){history.replaceState(null,'',`#words/deck/${encodeURIComponent(id)}`);}
+function wordRoute(id){articleRequest++;history.replaceState(null,'',`#words/deck/${encodeURIComponent(id)}`);}
 function openSelection(id,kind){
   const selection=S.selections.find(item=>item.id===id),part=selection?.[kind];
   if(!part||part.status!=='ready'){toast('这次选材暂无可打开的内容。');return;}
@@ -516,7 +519,14 @@ document.addEventListener('submit',async event=>{
     }
     if(form.id==='word-search')await runTask('words',S.wordFilters);
     if(form.id==='article-search')await runTask('articles',S.articleFilters);
-    if(form.id==='chat-form'){if(!S.compose.trim()){toast('写下你的问题，或选择一条快捷提问。');return;}await runTask('explain',{articleId:S.article.id,selection:S.selection,context:S.selectionContext,question:S.compose,language:S.language});S.compose='';if($('#compose'))$('#compose').value='';}
+    if(form.id==='chat-form'){
+      if(!S.compose.trim()){toast('写下你的问题，或选择一条快捷提问。');return;}
+      const articleId=S.article.id,question=S.compose;
+      await runTask('explain',{articleId,selection:S.selection,context:S.selectionContext,question,language:S.language});
+      const originalDraft=readDrafts.get(articleId);
+      if(originalDraft?.compose===question)readDrafts.set(articleId,{...originalDraft,compose:''});
+      if(S.article?.id===articleId&&S.compose===question){S.compose='';if($('#compose'))$('#compose').value='';rememberDraft();}
+    }
     if(form.id==='quiz-form')await runTask('quiz',{articleId:S.article.id,selection:S.selection,context:S.selectionContext,count:S.quizCount,questionType:S.quizType,level:S.article.level});
     if(form.id==='grade-form'){const answers=Object.fromEntries(new FormData(form));await runTask('grade',{articleId:S.article.id,quizId:form.dataset.id,answers});}
     if(form.id==='memory-form'){const submit=form.querySelector('[type=submit]');submit.disabled=true;try{const payload=S.memory.revision?S.memoryDraft:{...S.memoryDraft,notes:'',revision:''};S.memory=await api('/memory',payload);if(S.memory.revision)S.memoryDraft=null;if(!S.memory.personalize)S.directions={personalized:false,items:[],note:''};await refresh();render();toast(S.memory.warning||'记忆已保存');}finally{submit.disabled=false;}}

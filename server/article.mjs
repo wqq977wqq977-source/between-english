@@ -15,11 +15,26 @@ export function publicIP(ip) {
   if (family === 6) return /^2[0-9a-f]{3}:/i.test(ip) && !/^2001:(?:0:|db8:)/i.test(ip) && !/^2002:/i.test(ip);
   return false;
 }
+async function lookupWithSignal(host, signal) {
+  signal?.throwIfAborted();
+  if (!signal) return lookup(host, { all: true, verbatim: true });
+  let abort;
+  const cancelled = new Promise((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try {
+    // System DNS cannot be cancelled, but it must not hold up the task queue.
+    // Promise.race also handles a lookup rejection arriving after cancellation.
+    return await Promise.race([lookup(host, { all: true, verbatim: true }), cancelled]);
+  } finally { signal.removeEventListener('abort', abort); }
+}
 export async function validateRemoteURL(value, signal) {
+  signal?.throwIfAborted();
   let url; try { url = new URL(value); } catch { throw new UserError('请输入完整的文章网址。'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || (url.port && !['80', '443'].includes(url.port))) throw new UserError('仅支持常规 HTTP/HTTPS 文章链接。');
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  let addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookup(host, { all: true, verbatim: true });
+  let addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookupWithSignal(host, signal);
   // Some local proxy clients return benchmarking-range synthetic DNS addresses.
   // Resolve through a fixed authenticated public resolver; never allow that range.
   if (!isIP(host) && addresses.length && addresses.every(a => /^198\.(18|19)\./.test(a.address))) {
@@ -86,5 +101,10 @@ export function extractArticle(html, url) {
 export async function fetchArticle(url, signal) {
   const deadline = signal ? AbortSignal.any([signal, AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000);
   try { const page = await download(url, deadline); return extractArticle(page.html, page.url); }
-  catch (e) { if (e instanceof UserError) throw e; throw new UserError('暂时无法获取原文。请检查网络，或使用“导入文章”。', 422); }
+  catch (e) {
+    if (signal?.aborted) throw new UserError('任务已取消。', 409);
+    if (deadline.aborted) throw new UserError('读取原文超时，请稍后重试或导入文本。', 504);
+    if (e instanceof UserError) throw e;
+    throw new UserError('暂时无法获取原文。请检查网络，或使用“导入文章”。', 422);
+  }
 }
