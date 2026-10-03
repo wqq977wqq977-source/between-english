@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os';
 
 test('API settings, reading tasks, Codex search and destination snapshots work through real HTTP routes', { timeout: 25000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'between-provider-http-'));
-  const data = join(directory, 'data'), binary = join(directory, 'fake-codex');
+  // Node 22.13 does not infer ESM from top-level for-await alone.
+  const data = join(directory, 'data'), binary = join(directory, 'fake-codex.mjs');
   const key = 'fixture-secret-for-http-only', requests = [];
   const articleText = 'Earth follows an orbit. An orbit is a curved path around another object. People can study this path to learn how objects move in space.';
   const word = { word:'orbit', phonetic:'', partOfSpeech:'noun', meaning:'轨道', definition:'A path around a body.', example:'Earth follows an orbit.', exampleTranslation:'地球沿轨道运行。', level:'B1' };
