@@ -18,4 +18,8 @@ CLI 登录凭据由 CLI 管理。不要提交凭据文件、真实 API Key 或�
 
 ## 报告问题
 
-发现凭据暴露或访问控制问题时，请先停止受影响的服务，并在对应供应商处撤销已泄露的凭据。通过仓库维护者提供的私密渠道报告复现步骤；如果仓库启用了 GitHub 私密漏洞报告，也可使用该入口。报告仅附脱敏后的最小复现，不包含个人学习记录或密钥。
+发现凭据暴露或访问控制问题时，请先停止受影响的服务，并在对应供应商处撤销已泄露的凭据。
+
+优先使用 [GitHub 私密漏洞报告](https://github.com/wqq977wqq977-source/between-english/security/advisories/new)。该入口需要维护者为仓库启用私密报告；若不可用，可在 [Issue](https://github.com/wqq977wqq977-source/between-english/issues/new) 中仅请求私下联系渠道，不公开漏洞细节。
+
+报告提供脱敏后的最小复现、受影响版本、预期影响及环境，不包含个人学习记录或密钥。普通功能错误请使用 [问题反馈模板](https://github.com/wqq977wqq977-source/between-english/issues/new/choose)。

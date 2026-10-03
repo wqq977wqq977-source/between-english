@@ -52,7 +52,7 @@ async function ensureRunning() {
   const initial = await probe();
   if (initial === 'ready') return;
   assertAvailable(initial);
-  await mkdir(dirname(logPath), { recursive: true });
+  await mkdir(dirname(logPath), { recursive: true, mode: 0o700 });
   const log = await open(logPath, 'a', 0o600);
   await log.chmod(0o600);
   const env = { ...process.env, PORT: '4318', STUDY_OPEN: '0' };

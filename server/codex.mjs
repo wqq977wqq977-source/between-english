@@ -28,6 +28,8 @@ export function parseEvent(event, evidence) {
   const item = event?.item;
   const invalid = () => { throw new UserError('Codex 返回的进展数据格式异常，请重试。', 502); };
   const optionalString = value => value == null || typeof value === 'string';
+  if (['error', 'turn.failed'].includes(event?.type)
+    && (!optionalString(event.message) || !optionalString(event.error?.message))) invalid();
   if (item?.type === 'web_search' && event.type === 'item.completed' && item.action?.type === 'search') {
     const queries = item.action.queries;
     const results = item.results ?? [];

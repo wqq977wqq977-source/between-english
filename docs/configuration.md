@@ -4,6 +4,8 @@
 
 ## 启动方式
 
+终端运行面向 macOS / Linux；CI 配置覆盖 Ubuntu 的 Node 22.13.0 / 24 和 macOS 的 Node 24。原生 Windows 尚未验证。Windows 用户可在 WSL2 内安装运行，但 WSL2 的浏览器与登录流程尚未单独验收。
+
 ### 终端
 
 安装 Node.js 22.13+（推荐 24）和 Codex CLI，在项目目录运行 `npm ci`、`codex login`、`npm start`。服务默认位于 <http://127.0.0.1:4318>，随终端进程结束而停止。开发时使用 `npm run dev`，后端文件变化后自动重启；前端修改后刷新页面即可。
@@ -19,6 +21,10 @@
 启动器检查 Node 和依赖，用文件锁避免重复启动，等待网页就绪后打开选材中心。服务在后台运行，重复启动会复用已有服务。`./start.command --no-open` 只启动和检查服务。
 
 仓库提供 `start.command` 与其辅助脚本，不包含个人电脑上的桌面 `.app`。启动器固定使用端口 `4318`、项目的 `data/` 和根目录 `memroy.md`；自定义端口或数据目录请用 `npm start`。
+
+从 Finder 打开时不会自动加载 nvm、fnm 等交互式终端配置。若提示找不到 Node，可在已选好 Node 版本的终端运行 `./start.command`，或使用 `npm start`。启动器保留终端原有的 `PATH` 优先顺序。
+
+更新项目后先运行 `npm ci` 以同步锁定的依赖。启动器只在依赖缺失时自动安装，不会替换已存在但版本不同的依赖。
 
 ## 环境变量
 
@@ -41,6 +47,12 @@ PORT=4319 STUDY_DATA_DIR="$HOME/.local/share/between-english" npm start
 这个示例把数据库、API 配置和记忆文件放入独立目录。相对目录按启动时的工作目录解析，使用绝对目录更清楚。运行时临时文件仍位于项目中的 `work/runs/`。
 
 ## Codex 与模型选择
+
+本应用依赖 `codex exec` 的 `--ignore-user-config`、`--ephemeral`、`--json`、`--output-schema`，以及 `codex app-server --stdio` 的 `model/list` 协议。2026-10-03 用应用实际选中的 CLI 0.159.3 完成了模型发现、真实单词检索和来源校验；另核对了终端 PATH 中 CLI 0.160.0 的帮助参数。两条路径可能指向不同版本，可用 `CODEX_BINARY` 明确指定。
+
+尚未确定更早版本的最低兼容版本，也不保证任意新旧版本的事件格式都兼容。自动化测试使用协议替身；真实验证使用单一账户和模型，不代表所有账户、模型和供应商均可调用。
+
+使用前可在终端检查 `codex --version`、`codex exec --help`、`codex app-server --help`。若报未知参数或模型目录格式异常，先记录版本与脱敏后的错误，使用兼容版本后重新获取模型。CLI 的安装与登录方式参见 [Codex 官方说明](https://developers.openai.com/codex/cli/)。
 
 在「设置 → 模型与接口」获取可用模型，分别配置检索与阅读助手。模型发现使用本机 `codex app-server --stdio` 的 `model/list`，读取全部分页中的可见文本模型；不创建对话、不调用模型推理。
 
@@ -95,6 +107,14 @@ PORT=4319 STUDY_DATA_DIR="$HOME/.local/share/between-english" npm start
 删除记忆文件后会以默认备注重建摘要，因此修改或删除前应备份自己的备注。服务退出时未完成的任务，下次启动显示为中断，可手动重试。
 
 ## 等待与诊断
+
+| 问题 | 处理方式 |
+| --- | --- |
+| `No such built-in module: node:sqlite` 或 SQLite 不可用 | 使用 Node 22.13+，推荐 Node 24；检查启动终端中的 `node --version`。 |
+| 找不到 Codex 或显示未登录 | 检查 `CODEX_BINARY` / `PATH`，在相同系统用户下运行 `codex login`，再回设置页刷新连接。 |
+| 端口 4318 已被占用 | 先确认占用的是已有句。间还是其他服务；需要并行启动时使用 `PORT=4319 npm start`。 |
+| 获取到模型，但调用失败 | 模型目录不保证权限或额度；检查页面诊断和账户可用性，必要时换用自己可调用的模型。 |
+| 本地页面能打开，但文章正文读取失败 | 尝试其他公开文章，或导入自己可使用的正文。 |
 
 - 单词、文章及统一选材：有新事件时继续等待，最长 10 分钟；连续 4 分钟无新事件则停止。
 - 推荐方向：最长 2 分钟；连续 1 分钟无新事件则停止。

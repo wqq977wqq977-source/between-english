@@ -1,5 +1,7 @@
 # 参与开发
 
+可以从 [问题反馈或功能建议](https://github.com/wqq977wqq977-source/between-english/issues/new/choose) 开始。修正文档和小范围修复可直接提交 PR；较大的功能改动先说明场景和预期行为，便于确认方向。
+
 ## 本地运行
 
 使用 Node.js 22.13+（推荐 24），在项目目录执行：
@@ -18,6 +20,8 @@ PORT=4319 STUDY_DATA_DIR="$HOME/.local/share/between-english-dev" npm run dev
 ```
 
 配置说明见 [docs/configuration.md](docs/configuration.md)。
+
+终端开发面向 macOS / Linux；`start.command` 仅用于 macOS。原生 Windows 尚未验证，当前模拟 CLI 测试也依赖 Unix 可执行脚本。使用 Windows 时，可在 WSL2 内完成 Node、Codex 和项目安装；WSL2 本身未单独做浏览器与登录验收。
 
 ## 代码约定
 
@@ -38,6 +42,8 @@ npm test
 
 测试文件串行执行，以免模拟子进程争用启动时间，导致短超时用例偶发失败。
 
+CI 配置覆盖 Ubuntu 的最低 Node 22.13.0 和 Node 24，以及 macOS 的 Node 24。模型真实检索、登录和额度不属于 CI 验证范围。
+
 修复业务行为时补充能复现问题的回归测试。涉及页面布局或交互时，另外在桌面与窄屏浏览器检查；语法检查和单元测试不能替代视觉检查。
 
 ## 提交与 PR
@@ -48,3 +54,5 @@ npm test
 4. 若修改启动参数、模型边界或用户操作，同步更新相关文档。
 
 报告问题时提供复现步骤、Node / Codex 版本、期望和实际结果。不要附带登录凭据、API Key、完整数据库或私人学习记忆。
+
+涉及凭据或访问控制的问题请使用 [安全报告说明](SECURITY.md)，不要在公开 Issue 中粘贴漏洞细节或真实数据。
