@@ -65,7 +65,31 @@ function state() {
   return { words: store.list('word'), decks: store.list('deck'), articles: store.list('article').map(articleView), jobs: store.list('job').slice(0, 20).map(jobView), settings: settingsView(), connection: status, memory: learningMemory, activity: activity.view({ since: memory.enabledAt(), recording: learningMemory.recording }), modelCatalog: modelCatalog(), selections: store.list('selection').slice(0, 12), directions: directionsView(learningMemory) };
 }
 function required(kind, id) { const entry = store.get(id); if (!entry || !store.list(kind).some(x => x.id === id)) throw new UserError('找不到这条学习记录。', 404); return entry; }
-function bodyText(req) { return new Promise((accept, reject) => { let body = ''; req.on('data', chunk => { body += chunk; if (Buffer.byteLength(body) > 350000) { reject(new UserError('输入内容过长。', 413)); req.destroy(); } }); req.on('end', () => { try { accept(body ? JSON.parse(body) : {}); } catch { reject(new UserError('请求格式不正确。')); } }); req.on('error', reject); }); }
+function bodyText(req) {
+  return new Promise((accept, reject) => {
+    const chunks = []; let bytes = 0, tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      bytes += chunk.length;
+      if (bytes > 350000) {
+        tooLarge = true; chunks.length = 0;
+        // Drain the remainder without buffering, so the client receives the 413.
+        reject(new UserError('输入内容过长。', 413)); return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (tooLarge) return;
+      try {
+        const body = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, bytes));
+        const value = body ? JSON.parse(body) : {};
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a JSON object');
+        accept(value);
+      } catch { reject(new UserError('请求格式不正确，请发送有效的 JSON 对象。')); }
+    });
+    req.on('error', reject);
+  });
+}
 function selectedText(article, input) {
   const selection = string(input, 6000);
   if (selection && !article.text.includes(selection)) throw new UserError('选中的文字不属于当前文章，请重新选择。');

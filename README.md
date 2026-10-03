@@ -1,5 +1,7 @@
 # 句。间 Between
 
+简体中文 · [English](README.en.md)
+
 *Words into worlds.*
 
 在感兴趣的文章里学英语。用 Codex 寻找单词和真实英文文章，边读边问，让每次学习都有迹可循。
@@ -23,7 +25,7 @@
 
 ## 快速开始
 
-需要 **Node.js 22.13+（推荐 24）** 和 npm。
+需要 **Node.js 22.13+（推荐 24）** 和 npm。支持 macOS / Linux；原生 Windows 暂未验证。
 
 ```sh
 git clone https://github.com/wqq977wqq977-source/between-english.git
@@ -60,4 +62,6 @@ npm test
 
 [开发约定](CONTRIBUTING.md) · [数据保护与问题报告](SECURITY.md)
 
-本仓库暂未授予开源许可，标记为 `UNLICENSED`。
+## 许可
+
+[MIT](LICENSE) © 2026 WQQ977。依赖保留各自许可，见[第三方声明](THIRD_PARTY_NOTICES.md)。在线检索和导入的文章不包含在本项目的软件许可中。

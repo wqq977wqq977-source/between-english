@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "句。间 Between — a local English study companion for vocabulary and contextual reading.",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wqq977wqq977-source/between-english.git"

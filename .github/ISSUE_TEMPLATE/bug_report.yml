@@ -1,0 +1,26 @@
+name: 问题反馈
+description: 报告无法使用或与预期不符的行为。
+body:
+  - type: markdown
+    attributes:
+      value: 请使用示例内容复现。不要上传 API Key、数据库、学习记忆或私人截图；安全问题请先阅读 [SECURITY.md](https://github.com/wqq977wqq977-source/between-english/blob/main/SECURITY.md)。
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 发生了什么
+      description: 简要说明实际行为与期望结果。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 如何复现
+      description: 写出操作步骤；必要时附脱敏后的错误信息。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 操作系统、浏览器、Node 版本、Codex 版本（如涉及），以及使用的启动方式。
+      placeholder: "macOS / Chrome / Node 24 / Codex CLI … / npm start"

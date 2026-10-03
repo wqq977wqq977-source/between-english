@@ -1,0 +1,15 @@
+name: 功能建议
+description: 提出一个希望改善的学习体验。
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 想解决什么问题
+      description: 描述使用场景，以及当前哪里不方便。
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 你的想法
+      description: 可填写期望的操作或展示方式，也可以留空。

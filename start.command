@@ -1,13 +1,16 @@
 #!/bin/zsh
 set -eu
 cd "${0:A:h}"
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+# Respect a Node version selected by the caller; append common Finder paths.
+export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 fail() {
   print -u2 -- "$1"
   if [[ -t 0 ]]; then read -r '?按回车关闭…'; fi
   exit 1
 }
+
+[[ "$(uname -s)" == Darwin ]] || fail '一键启动器仅支持 macOS。请在项目目录运行 npm ci，然后运行 npm start。'
 
 mkdir -p work
 : >> work/launcher.lock
