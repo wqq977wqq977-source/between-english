@@ -1,0 +1,35 @@
+# Dependencies and local runtime
+node_modules/
+/data/
+/work/
+
+# Personal learning history and generated review artifacts
+/memroy.md
+/memroy.md.*
+/memory.md
+/outputs/
+/design-qa.md
+
+# Local configuration, credentials, database backups and logs
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.key
+*.pem
+api-provider.enc
+auth.json
+*.log
+*.log.*
+
+# Editor, OS and test artifacts
+.DS_Store
+._*
+.codex/
+.vscode/
+.idea/
+coverage/
+*.tmp

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="句。间 Between：在词汇与文章之间，建立自己的英语学习习惯。">
+  <meta name="color-scheme" content="light">
+  <title>句。间 Between · 英语学习</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div id="app"><div class="boot"><span class="brand-icon">b.</span><p>正在打开…</p></div></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="deck-dialog" aria-labelledby="deck-dialog-title">
+    <div class="dialog-head"><h2 id="deck-dialog-title">我的词表</h2><button type="button" class="icon-button" data-action="close-deck-library" aria-label="关闭词表">×</button></div>
+    <label for="deck-query"><span class="sr-only">搜索词表或单词</span><input id="deck-query" type="search" placeholder="搜索词表或单词" maxlength="100" autocomplete="off"></label>
+    <div id="deck-results"></div>
+  </dialog>
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <form id="import-form">
+      <div class="dialog-head"><h2 id="import-title">导入文章</h2><button type="button" class="icon-button" data-action="close-import" aria-label="关闭">×</button></div>
+      <label>文章标题<input name="title" placeholder="文章标题" maxlength="200" required></label>
+      <label>来源链接（可选）<input name="url" type="url" placeholder="https://…"></label>
+      <label>英文原文<textarea name="text" rows="11" placeholder="粘贴英文正文" minlength="100" maxlength="90000" required></textarea></label>
+      <div class="dialog-footer"><button class="primary" type="submit">开始阅读</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

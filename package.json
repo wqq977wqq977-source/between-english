@@ -1,0 +1,29 @@
+{
+  "name": "between-english",
+  "version": "0.1.0",
+  "description": "句。间 Between — a local English study companion for vocabulary and contextual reading.",
+  "private": true,
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wqq977wqq977-source/between-english.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wqq977wqq977-source/between-english/issues"
+  },
+  "homepage": "https://github.com/wqq977wqq977-source/between-english#readme",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "check": "node --check scripts/launch.mjs && node --check server/index.mjs && node --check server/codex.mjs && node --check server/diagnostics.mjs && node --check server/memory.mjs && node --check server/activity.mjs && node --check server/models.mjs && node --check server/model-options.mjs && node --check server/provider.mjs && node --check server/curation.mjs && node --check server/directions.mjs && node --check public/app.js",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.13"
+  }
+}
