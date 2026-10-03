@@ -77,11 +77,46 @@ async function download(value, signal, redirects = 0) {
   });
   return response.redirect ? download(response.redirect, signal, redirects + 1) : response;
 }
+function removeRecommendations(document) {
+  const normalize = text => text.replace(/\s+/g, ' ').trim().replace(/[:：]\s*$/, '');
+  const recommendation = /^(?:additional resources|related (?:articles|posts|stories|resources|content)(?: for (?:educators|teachers))?|read next|you (?:may|might) also like|recommended (?:articles|reading)|further reading|interested in learning more(?: about .{1,100})?\??)$/i;
+  const isRecommendationBlock = node => {
+    if (node.nodeType !== 1) return false;
+    return [node, ...node.querySelectorAll('p,li,div')].some(block => {
+      const links = block.matches('a[href]') ? [block] : [...block.querySelectorAll('a[href]')];
+      const linkedLength = links.filter(link => !link.getAttribute('href').startsWith('#'))
+        .reduce((length, link) => length + normalize(link.textContent).length, 0);
+      const length = normalize(block.textContent).length;
+      return length > 0 && linkedLength / length >= 0.8;
+    });
+  };
+  for (const heading of document.querySelectorAll('h2,h3,h4,h5,h6')) {
+    if (!heading.isConnected || !recommendation.test(normalize(heading.textContent))) continue;
+    const level = Number(heading.nodeName.slice(1));
+    const boundary = Array.from({ length: level }, (_, i) => `h${i + 1}`).join(',');
+    let start = heading;
+    // Publishers sometimes wrap only the heading, leaving the links as siblings.
+    while (start.parentElement && start.parentElement.children.length === 1
+      && normalize(start.parentElement.textContent) === normalize(heading.textContent)) start = start.parentElement;
+    const section = [];
+    for (let node = start.nextSibling; node; node = node.nextSibling) {
+      if (node.nodeType === 1 && (node.matches(boundary) || node.querySelector(boundary))) break;
+      section.push(node);
+    }
+    // A label or an inline citation is ambiguous. Require link-dominated blocks
+    // and stop at the next peer/parent heading rather than truncating the article.
+    if (!section.some(isRecommendationBlock)) continue;
+    start.remove();
+    for (const node of section) node.remove();
+  }
+}
+
 export function extractArticle(html, url) {
   const { document } = parseHTML(html);
   const parsed = new Readability(document, { charThreshold: 200 }).parse();
   if (!parsed?.content) throw new UserError('没有找到完整正文，请打开来源网站后导入文本。', 422);
   const clean = parseHTML(parsed.content).document;
+  removeRecommendations(clean);
   const paragraphs = []; let current = '';
   const flush = () => { const line = current.replace(/\s+/g, ' ').trim(); if (line && paragraphs.at(-1) !== line) paragraphs.push(line); current = ''; };
   const walk = node => {
@@ -93,7 +128,7 @@ export function extractArticle(html, url) {
     if (block) flush();
   };
   walk(clean); flush();
-  const text = (paragraphs.length ? paragraphs : parsed.textContent.split(/\n+/).map(t => t.trim()).filter(Boolean)).join('\n\n');
+  const text = paragraphs.join('\n\n');
   if (text.length < 250 || /^(access denied|just a moment|verify you are human)/i.test(parsed.title || '')) throw new UserError('来源网站没有返回可用正文，请导入文章文本。', 422);
   if (text.length > 90000) throw new UserError('文章过长，请导入需要学习的部分。', 422);
   return { title: parsed.title || new URL(url).hostname, text, wordCount: text.split(/\s+/).length, byline: parsed.byline || '', url };
