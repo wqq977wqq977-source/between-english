@@ -455,14 +455,22 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && /^\/api\/articles\/[^/]+\/visit$/.test(path)) {
         const article = required('article', path.split('/')[3]);
         if (!article.text) throw new UserError('请先打开文章原文。');
-        memory.record('article_opened', { articleId: article.id, title: article.title }); return send({ ok: true });
+        store.transaction(() => {
+          article.startedAt ||= now();
+          store.put('article', article);
+          memory.record('article_opened', { articleId: article.id, title: article.title });
+        });
+        return send(articleView(article));
       }
       if (req.method === 'POST' && path.startsWith('/api/articles/')) {
         const article = required('article', path.split('/')[3]);
         const savedChanged = typeof input.saved === 'boolean' && input.saved !== Boolean(article.saved);
         const completedChanged = typeof input.completed === 'boolean' && input.completed !== Boolean(article.completed);
         if (typeof input.saved === 'boolean') article.saved = input.saved;
-        if (input.paragraph !== undefined) article.paragraph = integer(input.paragraph, 0, Math.max(0, (article.text || '').split(/\n\n+/).length - 1), 0);
+        if (input.paragraph !== undefined) {
+          article.paragraph = integer(input.paragraph, 0, Math.max(0, (article.text || '').split(/\n\n+/).length - 1), 0);
+          if (article.text) article.startedAt ||= now();
+        }
         if (typeof input.completed === 'boolean') article.completed = input.completed;
         store.transaction(() => {
           store.put('article', article);

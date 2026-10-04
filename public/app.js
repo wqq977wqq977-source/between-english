@@ -27,6 +27,22 @@ const settingsBusy = () => S.settingsSaving || S.modelsLoading || Boolean(S.apiA
 const apiEndpoint = value => String(value || '').trim().replace(/\/+$/, '');
 const hasSavedApiKey = () => Boolean(S.settings.api?.hasKey && !S.apiDraft?.clearKey && apiEndpoint(S.apiDraft?.baseUrl) === apiEndpoint(S.settings.api?.baseUrl));
 function apiDraftPayload() { const d=S.apiDraft;return {baseUrl:d.baseUrl.trim(),model:d.model.trim(),apiKey:d.apiKey,clearKey:d.clearKey,reasoningEffort:d.reasoningEffort,fastMode:d.fastMode}; }
+const modelPreferences = value => ({model:value.model||'',tutorModel:value.tutorModel||'',tutorProvider:value.tutorProvider||'codex',reasoningEffort:value.reasoningEffort||'',fastMode:value.fastMode===true,tutorReasoningEffort:value.tutorReasoningEffort||'',tutorFastMode:value.tutorFastMode===true});
+const apiPreferences = value => ({baseUrl:apiEndpoint(value?.baseUrl),model:String(value?.model||'').trim(),reasoningEffort:value?.reasoningEffort||'',fastMode:value?.fastMode===true});
+function settingsDirty() {
+  if(!S.settingsDraft||!S.apiDraft)return false;
+  return JSON.stringify(modelPreferences(S.settingsDraft))!==JSON.stringify(modelPreferences(S.settings)) ||
+    JSON.stringify(apiPreferences(S.apiDraft))!==JSON.stringify(apiPreferences(S.settings.api)) ||
+    Boolean(S.apiDraft.apiKey.trim()) || Boolean(S.apiDraft.clearKey&&S.settings.api?.hasKey);
+}
+function settingsFooterMarkup() {
+  const dirty=settingsDirty(),locked=settingsBusy();
+  return `<span class="settings-save-status ${dirty?'is-dirty':''}" role="status">${S.settingsSaving?'正在保存…':dirty?'有未保存的修改':'已保存'}</span><div class="settings-save-actions"><button type="button" class="ghost" data-action="reset-settings-draft" ${!dirty||locked?'disabled':''}>撤销更改</button><button type="submit" class="primary" ${!dirty||locked?'disabled':''}>${S.settingsSaving?'保存中…':'保存偏好'}</button></div>`;
+}
+function updateSettingsFooter() {
+  const footer=$('#settings-save-bar');if(footer)footer.innerHTML=settingsFooterMarkup();
+}
+window.addEventListener('beforeunload',event=>{if(settingsDirty()){event.preventDefault();event.returnValue='';}});
 const options = (values, selected) => values.map(v => `<option value="${esc(v)}" ${String(selected) === String(v) ? 'selected' : ''}>${esc(v)}</option>`).join('');
 const wordById = id => S.words.find(w => w.id === id);
 const deck = () => S.decks.find(d => d.id === S.deckId) || S.decks[0];
@@ -63,12 +79,15 @@ function shell(content) {
   return `<div class="shell ${S.sidebarCollapsed?'sidebar-collapsed':''}"><aside class="sidebar" id="sidebar"><div class="brand"><span class="brand-icon">b.</span><div class="brand-text"><div class="brand-name">句<span class="brand-pause">。</span>间</div><div class="brand-en">Between</div></div></div>${sidebarToggleMarkup()}<div class="nav-label">学习空间</div><nav class="nav" aria-label="主导航">${[['curate','spark','选材中心'],['words','words','单词学习'],['reading','book','英文阅读'],['learning','activity','我的学习'],['settings','settings','设置']].map(([id,ic,label]) => `<button type="button" id="nav-${id}" data-nav="${id}" class="${S.nav === id ? 'active' : ''}" title="${label}" aria-label="${label}" ${S.nav === id ? 'aria-current="page"' : ''}>${icon(ic)}<span class="nav-label-text">${label}</span><span class="nav-tooltip" aria-hidden="true">${label}</span>${id === 'learning' && due().length ? `<span class="count">${due().length}</span>`:''}</button>`).join('')}</nav><div class="sidebar-footer"><div class="connection-pill"><span class="status-dot ${S.connection.authenticated ? '' : 'off'}"></span><span>${S.connection.authenticated ? S.settings.tutorProvider==='api'?'Codex 检索 · API 助手':'Codex 已连接' : '等待连接 Codex'}</span></div><div class="small-note">一点积累，自成语感。</div></div></aside><main class="workspace ${reading ? 'reading-workspace' : ''}" id="main" tabindex="-1"><div class="topbar"><span>我的学习空间 <span aria-hidden="true">/</span> <strong>${({curate:'选材中心',words:'单词学习',reading:'英文阅读',learning:'我的学习',settings:'偏好设置'})[S.nav]}</strong></span><span class="date">${new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'})}</span></div><div id="jobs">${jobsMarkup()}</div>${S.error ? `<div class="hint-strip error-strip" role="alert">${esc(S.error)} <button class="ghost small" data-action="dismiss-error">关闭</button></div>` : ''}${content}</main></div>`;
 }
 function render() {
-  const readerScroll = $('.reader')?.scrollTop || 0, chatScroll = $('.assistant-body')?.scrollTop || 0, activityScroll=$('.activity-scroll')?.scrollLeft;
+  rememberChatViewport();
+  reconcileChatReply();
+  const oldReader=$('.reader'),readerScroll=oldReader&&oldReader.dataset.articleId===S.article?.id?oldReader.scrollTop||0:0,activityScroll=$('.activity-scroll')?.scrollLeft;
   const focus = document.activeElement?.id, cursor = document.activeElement?.selectionStart;
   $('#app').innerHTML = shell(({curate:curationPage,words:wordsPage,reading:readingPage,learning:learningPage,settings:settingsPage})[S.nav]());
   if ($('.reader')) $('.reader').scrollTop = readerScroll;
   if ($('.activity-scroll')) $('.activity-scroll').scrollLeft=activityScroll??$('.activity-scroll').scrollWidth;
-  if ($('.assistant-body')) $('.assistant-body').scrollTop = chatScroll;
+  syncReadingAssistant();
+  restoreChatViewport();
   if (focus && document.getElementById(focus)) { const el = document.getElementById(focus); el.focus({preventScroll:true}); if (cursor != null && el.setSelectionRange) el.setSelectionRange(cursor, cursor); }
   observeReading();
   if($('#deck-dialog')?.open)renderDeckLibrary();
@@ -82,6 +101,12 @@ function tabPanelsMarkup(group, items, selected, content, className='') {
   return items.map(([id])=>`<div id="${group}-panel-${id}" class="tab-panel ${className}" role="tabpanel" aria-labelledby="${group}-tab-${id}" tabindex="0" ${selected===id?'':'hidden'}>${selected===id?content:''}</div>`).join('');
 }
 function persistCurationDraft() { try { localStorage.setItem('between.curationDraft',JSON.stringify(S.curationDraft)); } catch { /* A private browser can still use this page without saved drafts. */ } }
+function curationDefaultsSummary() {
+  const d=S.curationDraft,parts=[d.defaultLevel||'B2'];
+  if(d.target!=='articles')parts.push(`${d.defaultWordCount||'—'} 个词`);
+  if(d.target!=='words')parts.push(`${d.defaultArticleCount||'—'} 篇文章`);
+  return parts.join(' · ');
+}
 function curationTargets(selected) { return [['auto','自动'],['both','单词与文章'],['words','只选单词'],['articles','只选文章']].map(([value,label])=>`<option value="${value}" ${value===selected?'selected':''}>${label}</option>`).join(''); }
 function selectionDestination(selection,kind) {
   const part=selection[kind];if(!part?.requested)return '';
@@ -96,7 +121,7 @@ function curationPage() {
   return `<header class="page-head"><div><h1>选材中心</h1></div><span class="head-mark">Follow your curiosity.</span></header>
     <form id="curation-form" class="panel curation-panel"><label class="curation-label" for="curation-prompt">今天想学什么？</label><textarea id="curation-prompt" data-curation="prompt" rows="3" maxlength="2000" required placeholder="想读太空探索相关的 B1 文章，选 10 个常用词和 2 篇短文。">${esc(d.prompt)}</textarea>
     <div class="curation-toolbar"><label class="curation-target" for="curation-target"><span>选材范围</span><select id="curation-target" data-curation="target">${curationTargets(d.target)}</select></label><button class="primary" type="submit" ${working?'disabled':''}>${working?'Codex 正在筛选…':'交给 Codex 筛选'} ${working?'':icon('spark')}</button></div>
-    <details id="curation-defaults" class="curation-defaults" ${S.curationDefaultsOpen?'open':''}><summary>默认条件 <span>未注明时采用</span></summary><div class="curation-default-grid"><label for="curation-word-count">单词数量<input id="curation-word-count" data-curation="defaultWordCount" type="number" min="1" max="100" required value="${esc(d.defaultWordCount)}"></label><label for="curation-article-count">文章数量<input id="curation-article-count" data-curation="defaultArticleCount" type="number" min="1" max="10" required value="${esc(d.defaultArticleCount)}"></label><label for="curation-level">参考难度<select id="curation-level" data-curation="defaultLevel">${options(levels,d.defaultLevel||'B2')}</select></label></div></details></form>
+    <details id="curation-defaults" class="curation-defaults" ${S.curationDefaultsOpen?'open':''}><summary>默认条件 <span id="curation-defaults-summary">${esc(curationDefaultsSummary())}</span></summary><div class="curation-default-grid"><label for="curation-word-count">单词数量<input id="curation-word-count" data-curation="defaultWordCount" type="number" min="1" max="100" required value="${esc(d.defaultWordCount)}"></label><label for="curation-article-count">文章数量<input id="curation-article-count" data-curation="defaultArticleCount" type="number" min="1" max="10" required value="${esc(d.defaultArticleCount)}"></label><label for="curation-level">参考难度<select id="curation-level" data-curation="defaultLevel">${options(levels,d.defaultLevel||'B2')}</select></label></div></details></form>
     <section aria-labelledby="directions-title"><div class="section-head"><h2 id="directions-title">${directions.personalized?'为你推荐':'起步方向'}</h2><div class="row wrap"><span class="badge neutral">GPT-6-Luna · Fast</span><button type="button" class="ghost small" data-action="refresh-directions" ${recommending?'disabled':''}>${recommending?'推荐中…':'重新推荐'}</button></div></div>${directions.items?.length?`<div class="direction-grid">${directions.items.map(item=>`<article class="direction-card"><h3>${esc(item.title)}</h3><p>${esc(item.reason)}</p><button type="button" class="ghost small" data-action="use-direction" data-id="${esc(item.id)}">用这个方向 <span aria-hidden="true">↗</span></button></article>`).join('')}</div>`:'<p class="muted">还没有推荐方向。</p>'}${directions.note?`<p class="direction-note">${esc(directions.note)} <button type="button" class="ghost small" data-nav="settings">学习偏好 ↗</button></p>`:''}</section>
     ${selections.length?`<section aria-labelledby="selections-title"><div class="section-head"><h2 id="selections-title">最近选材</h2><span class="muted">${selections.length} 次记录</span></div>${selectionMarkupCard(selections[0])}${selections.length>1?`<details class="selection-history"><summary>此前选材 · ${selections.length-1} 次</summary><div class="selection-history-list">${selections.slice(1).map(selectionMarkupCard).join('')}</div></details>`:''}</section>`:''}`;
 }
@@ -104,9 +129,51 @@ function wordFilters() {
   const f = S.wordFilters;
   return `<form id="word-search" class="panel"><div class="panel-head"><h2>筛选单词</h2></div><div class="filter-grid">${filterInput('主题','topic',f,'word','maxlength="150" placeholder="例如：商务会议、旅行、AI" required')}${filterSelect('参考难度','level',levels,f,'word')}${filterInput('单词数量','count',f,'word','type="number" min="1" max="100" required')}${filterSelect('词汇范围','range',['主题词汇','四级词汇','六级词汇','雅思词汇','托福词汇','商务英语'],f,'word')}</div><details class="advanced" ${f.extra ? 'open' : ''}><summary>补充要求</summary><label class="advanced"><span class="sr-only">补充选词要求</span><input data-filter="word" name="extra" value="${esc(f.extra)}" placeholder="例如：多选常见动词，避开过于专业的术语" maxlength="500"></label></details><div class="filter-bottom"><label class="check"><input type="checkbox" data-filter="word" name="excludeKnown" ${f.excludeKnown ? 'checked' : ''}>排除已掌握</label><button type="submit" class="primary" ${busy('words') ? 'disabled' : ''}>${busy('words') ? '正在检索…' : '检索单词'}</button></div></form>`;
 }
+S.wordDetailId='';
 function wordTable(words, editable = false) {
-  return `<div class="table-wrap"><table class="word-table"><thead><tr><th>单词</th><th>释义</th><th>状态</th><th class="source-col">来源</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>${words.map(w=>`<tr><td><div class="english${w.saved?' is-saved':''}">${esc(w.word)}</div><div class="phonetic">${esc(w.phonetic)} ${esc(w.partOfSpeech)}</div></td><td>${esc(w.meaning)}${w.articleTitle ? `<div class="phonetic">摘自 ${esc(w.articleTitle)}</div>`:''}</td><td><span class="badge ${w.review?.rating === 'known' ? '' : 'neutral'}">${w.review ? ({known:'已掌握',fuzzy:'需巩固',unknown:'不认识'})[w.review.rating] : esc(w.level || '新词')}</span></td><td class="source-col">${source(w.sourceUrl,w.sourceTitle)}</td><td><div class="actions"><button class="ghost small" data-action="save-word" aria-pressed="${w.saved?'true':'false'}" data-id="${esc(w.id)}" title="${w.saved?'移出生词本':'加入生词本'}">${w.saved?'已收藏':'收藏'}</button>${editable ? `<button class="ghost small" data-action="replace-word" data-id="${esc(w.id)}" ${busy('words')?'disabled':''}>替换</button><button class="ghost small danger" data-action="remove-word" data-id="${esc(w.id)}" ${deck()?.wordIds.length<=1?'disabled title="词表至少保留一个单词"':''}>移除</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="word-table"><thead><tr><th>单词</th><th>释义</th><th>状态</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>${words.map(w=>{
+    const expanded=S.wordDetailId===w.id,key=encodeURIComponent(w.id),detailsId=`word-details-${key}`,menuId=`word-more-${key}`;
+    return `<tr class="word-summary-row${expanded?' is-expanded':''}"><td><button type="button" id="word-detail-trigger-${key}" class="word-disclosure english${w.saved?' is-saved':''}" data-word-detail="${esc(w.id)}" aria-expanded="${expanded}" ${expanded?`aria-controls="${detailsId}"`:''} aria-label="${expanded?'收起':'展开'} ${esc(w.word)} 的例句和来源">${esc(w.word)}</button><div class="phonetic">${esc(w.phonetic)} ${esc(w.partOfSpeech)}</div></td><td>${esc(w.meaning)}</td><td><span class="badge ${w.review?.rating==='known'?'':'neutral'}">${w.review?({known:'已掌握',fuzzy:'需巩固',unknown:'不认识'})[w.review.rating]:esc(w.level||'新词')}</span></td><td><div class="actions"><button type="button" class="ghost small" data-action="save-word" aria-pressed="${w.saved?'true':'false'}" data-id="${esc(w.id)}" title="${w.saved?'移出生词本':'加入生词本'}">${w.saved?'已收藏':'收藏'}</button>${editable?`<button type="button" id="word-more-trigger-${key}" class="ghost small word-more-trigger" data-word-menu="${menuId}" aria-label="${esc(w.word)} 的更多操作" aria-haspopup="menu" aria-expanded="false" aria-controls="${menuId}">···</button><div id="${menuId}" class="word-more-menu" role="menu" aria-labelledby="word-more-trigger-${key}" hidden><button type="button" role="menuitem" tabindex="-1" class="ghost small" data-action="replace-word" data-id="${esc(w.id)}" ${busy('words')?'disabled':''}>替换</button><button type="button" role="menuitem" tabindex="-1" class="ghost small danger" data-action="remove-word" data-id="${esc(w.id)}" ${deck()?.wordIds.length<=1?'disabled title="词表至少保留一个单词"':''}>从词表移除</button></div>`:''}</div></td></tr>${expanded?`<tr class="word-details-row"><td colspan="4"><div class="word-inline-details" id="${detailsId}" role="region" aria-label="${esc(w.word)} 的例句和来源">${w.definition?`<p class="word-definition" lang="en">${esc(w.definition)}</p>`:''}${w.example?`<div class="word-inline-example"><span class="eyebrow">${w.exampleKind==='original'?'原文例句':'AI 例句'}</span><p lang="en">${esc(w.example)}</p>${w.exampleTranslation?`<p class="word-translation">${esc(w.exampleTranslation)}</p>`:''}</div>`:'<p class="muted">暂无例句</p>'}<div class="word-detail-source">${w.articleTitle?`<span class="muted">摘自 ${esc(w.articleTitle)}</span>`:''}${source(w.sourceUrl,w.sourceTitle)}</div></div></td></tr>`:''}`;
+  }).join('')}</tbody></table></div>`;
 }
+function closeWordMenu(restoreFocus=false) {
+  const menu=$('.word-more-menu:not([hidden])');if(!menu)return;
+  const trigger=document.getElementById(menu.getAttribute('aria-labelledby'));
+  menu.hidden=true;trigger?.setAttribute('aria-expanded','false');
+  if(restoreFocus)trigger?.focus({preventScroll:true});
+}
+function openWordMenu(trigger,last=false) {
+  closeWordMenu();const menu=document.getElementById(trigger.dataset.wordMenu);if(!menu)return;
+  menu.hidden=false;trigger.setAttribute('aria-expanded','true');
+  const rect=trigger.getBoundingClientRect(),width=menu.offsetWidth||156,height=menu.offsetHeight||96;
+  const viewportWidth=window.innerWidth||document.documentElement.clientWidth||1024,viewportHeight=window.innerHeight||document.documentElement.clientHeight||768;
+  menu.style.left=`${Math.max(8,Math.min(rect.right-width,viewportWidth-width-8))}px`;
+  menu.style.top=`${Math.max(8,rect.bottom+height+8>viewportHeight?rect.top-height-6:rect.bottom+6)}px`;
+  const items=[...menu.querySelectorAll('button:not([disabled])')];items[last?items.length-1:0]?.focus({preventScroll:true});
+}
+document.addEventListener('click',event=>{
+  const detail=event.target.closest('[data-word-detail]');
+  if(detail){S.wordDetailId=S.wordDetailId===detail.dataset.wordDetail?'':detail.dataset.wordDetail;render();return;}
+  const trigger=event.target.closest('[data-word-menu]');
+  if(trigger){if(trigger.getAttribute('aria-expanded')==='true')closeWordMenu(true);else openWordMenu(trigger);return;}
+  if(event.target.closest('[role="menuitem"]'))closeWordMenu(true);
+  else if(!event.target.closest('.word-more-menu'))closeWordMenu();
+});
+document.addEventListener('keydown',event=>{
+  const trigger=event.target.closest('[data-word-menu]'),menu=event.target.closest('.word-more-menu');
+  if(trigger&&['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();openWordMenu(trigger,event.key==='ArrowUp');return;}
+  if(event.key==='Escape'&&$('.word-more-menu:not([hidden])')){event.preventDefault();closeWordMenu(true);return;}
+  if(!menu)return;
+  if(event.key==='Tab'){closeWordMenu(true);return;}
+  if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
+    event.preventDefault();const items=[...menu.querySelectorAll('button:not([disabled])')],index=items.indexOf(event.target);
+    const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;
+    items[next]?.focus({preventScroll:true});
+  }
+});
+document.addEventListener('focusin',event=>{if(!event.target.closest('.word-more-menu,[data-word-menu]'))closeWordMenu();});
+document.addEventListener('scroll',()=>closeWordMenu(),true);
+window.addEventListener('resize',()=>closeWordMenu());
 const wordSearchKey = value => String(value || '').normalize('NFKC').trim().toLowerCase();
 function wordBrowse(scope) {
   const view=S.wordBrowse[scope];
@@ -157,19 +224,109 @@ function articleFilterPanel() {
   const f=S.articleFilters;
   return `<form id="article-search" class="panel"><div class="panel-head"><h2>筛选文章</h2><span class="eyebrow">A little reading, every day</span></div><div class="filter-grid article-filters">${filterInput('主题','topic',f,'article','maxlength="150" placeholder="例如：太空探索、产品设计" required')}${filterSelect('参考难度','level',levels,f,'article')}${filterInput('最少单词数','minWords',f,'article','type="number" min="50" max="5000" required')}${filterInput('最多单词数','maxWords',f,'article','type="number" min="50" max="8000" required')}</div><details class="advanced"><summary>更多条件</summary><div class="filter-grid">${filterSelect('文章类型','type',['不限','新闻','科普','评论','故事'],f,'article')}${filterInput('候选数量','count',f,'article','type="number" min="1" max="10" required')}${filterInput('来源网站','domain',f,'article','placeholder="例如：nasa.gov"')}${filterInput('发布时间不早于','since',f,'article','type="date"')}</div><label class="advanced">补充要求<input data-filter="article" name="extra" value="${esc(f.extra)}" placeholder="例如：讲清楚一个概念，少用专业术语" maxlength="500"></label></details><div class="filter-bottom"><button type="submit" class="primary" ${busy('articles')?'disabled':''}>${busy('articles')?'正在检索…':'检索文章'}</button></div></form>`;
 }
-function articleCards(articles) { return `<div class="article-grid">${articles.map(a=>`<article class="article-card"><div class="row spread"><span class="source-name">${esc(a.source || '我的文章')}</span><span class="badge ${a.completed?'lime':''}">${a.completed?'已读完':esc(a.level || '自选文章')}</span></div><h3>${esc(a.title)}</h3><p class="summary">${esc(a.summary || '')}</p><div class="card-bottom"><span class="muted">${a.wordCount || a.estimatedWords || '—'} 词${!a.wordCount&&!a.imported?'（估计）':''}</span><button class="small ${a.hasText?'light':'primary'}" data-action="open-article" data-id="${a.id}" ${busy('open')?'disabled':''}>${a.hasText?'继续阅读':'开始阅读'}</button></div><div class="row spread advanced">${source(a.url,a.source)}<button class="ghost small" data-action="save-article" aria-pressed="${a.saved?'true':'false'}" data-id="${a.id}">${a.saved?'已收藏':'收藏'}</button></div></article>`).join('')}</div>`; }
+const freshArticleBrowse = () => ({ query:'', status:'all', page:1, scope:'' });
+S.articleBrowse={find:freshArticleBrowse(),saved:freshArticleBrowse()};
+// Older records may only have a saved paragraph; downloading text alone is not a reading visit.
+const articleReadingStatus = article => article.completed?'completed':article.startedAt||Number(article.paragraph)>0?'reading':'unread';
+function articleBrowse() {
+  const view=S.articleBrowse[S.readTab==='saved'?'saved':'find'];
+  const scope=S.readTab==='saved'?'saved':S.articleIds?JSON.stringify(S.articleIds):'all';
+  if(view.scope!==scope){Object.assign(view,freshArticleBrowse(),{scope});}
+  return view;
+}
+function articleCards(articles) { return `<div class="article-grid">${articles.map(a=>{const status=articleReadingStatus(a);return `<article class="article-card"><div class="row spread"><span class="source-name">${esc(a.source || '我的文章')}</span><span class="badge ${status==='completed'?'lime':status==='unread'?'neutral':''}">${({unread:'未读',reading:'阅读中',completed:'已读完'})[status]}</span></div><h3>${esc(a.title)}</h3><p class="summary">${esc(a.summary || '')}</p><div class="card-bottom"><span class="muted">${a.level?`${esc(a.level)} · `:''}${a.wordCount || a.estimatedWords || '—'} 词${!a.wordCount&&!a.imported?'（估计）':''}</span><button class="small ${status==='unread'?'primary':'light'}" data-action="open-article" data-id="${esc(a.id)}" ${busy('open')?'disabled':''}>${({unread:'开始阅读',reading:'继续阅读',completed:'重新阅读'})[status]}</button></div><div class="row spread advanced">${source(a.url,a.source)}<button class="ghost small" data-action="save-article" aria-pressed="${a.saved?'true':'false'}" data-id="${esc(a.id)}">${a.saved?'已收藏':'收藏'}</button></div></article>`;}).join('')}</div>`; }
+function articleLibrary(articles) {
+  const view=articleBrowse(),query=view.query.normalize('NFKC').trim().toLocaleLowerCase(),size=6;
+  const matches=articles.filter(a=>(view.status==='all'||articleReadingStatus(a)===view.status)&&(!query||[a.title,a.summary,a.source].some(text=>String(text||'').normalize('NFKC').toLocaleLowerCase().includes(query))));
+  view.page=Math.max(1,Math.min(view.page,Math.max(1,Math.ceil(matches.length/size))));
+  const visible=matches.slice((view.page-1)*size,view.page*size);
+  return `<section class="article-library" id="article-library" aria-label="浏览已选文章"><div class="article-library-tools"><label><span class="sr-only">搜索书架</span><input id="article-library-query" type="search" value="${esc(view.query)}" placeholder="搜索书架 · 标题或关键词" maxlength="100" autocomplete="off"></label><label><span class="sr-only">阅读状态</span><select id="article-library-status">${[['all','全部状态'],['unread','未读'],['reading','阅读中'],['completed','已读完']].map(([value,label])=>`<option value="${value}" ${view.status===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="article-library-meta" role="status">${query||view.status!=='all'?`匹配 ${matches.length} / ${articles.length} 篇`:`共 ${articles.length} 篇`}</div>${visible.length?articleCards(visible):`<div class="article-library-empty"><p>没有匹配的文章</p><button type="button" class="ghost small" data-library-action="clear">清除筛选</button></div>`}${listPagination({page:view.page,size,total:matches.length,prefix:'article',label:'文章列表'})}</section>`;
+}
 function readingPage() {
   if(S.article) return readerPage();
   const articles=S.readTab==='saved'?S.articles.filter(a=>a.saved):S.articleIds?S.articles.filter(a=>S.articleIds.includes(a.id)):S.articles;
   const items=[['find','发现文章'],['saved',`我的收藏 · ${S.articles.filter(a=>a.saved).length}`]];
-  const content=`${S.readTab==='find'?`<details id="article-search-details" class="article-search-details" ${S.articleSearchOpen===true||(S.articleSearchOpen===null&&!S.articles.length)?'open':''}><summary>筛选文章 <span>${esc(S.articleFilters.topic)} · ${esc(S.articleFilters.level)}</span></summary>${articleFilterPanel()}</details>`:''}<div class="section-head"><h2>${S.readTab==='saved'?'收藏的文章':'阅读书架'}</h2><span class="muted">${articles.length} 篇</span></div>${S.articleNote?`<details class="result-note"><summary>检索备注</summary><p>${esc(S.articleNote)}</p></details>`:''}${articles.length?articleCards(articles):empty(S.readTab==='saved'?'暂无收藏':'暂无文章',S.readTab==='saved'?'收藏想再读的文章。':'检索或导入一篇文章。','','Read.')}`;
+  const content=`${S.readTab==='find'?`<details id="article-search-details" class="article-search-details" ${S.articleSearchOpen===true||(S.articleSearchOpen===null&&!S.articles.length)?'open':''}><summary>筛选文章 <span>${esc(S.articleFilters.topic)} · ${esc(S.articleFilters.level)}</span></summary>${articleFilterPanel()}</details>`:''}<div class="section-head"><h2>${S.readTab==='saved'?'收藏的文章':S.articleIds?'本次选材':'阅读书架'}</h2>${S.readTab==='find'&&S.articleIds?'<button type="button" class="ghost small" data-library-action="all">全部文章</button>':''}</div>${S.readTab==='find'&&S.articleIds&&S.articleNote?`<details class="result-note"><summary>检索备注</summary><p>${esc(S.articleNote)}</p></details>`:''}${articles.length?articleLibrary(articles):empty(S.readTab==='saved'?'暂无收藏':'暂无文章',S.readTab==='saved'?'收藏想再读的文章。':'检索或导入一篇文章。','','Read.')}`;
   return `<header class="page-head"><div class="page-title"><h1>英文阅读</h1><button data-action="import">导入文章</button></div><span class="head-mark">Between the lines.</span></header>${tabsMarkup('read','阅读书架',items,S.readTab)}${tabPanelsMarkup('read',items,S.readTab,content)}`;
 }
+const readerPreferences=draft('between.reader',{fontSize:0,focus:false});
+readerPreferences.fontSize=[0,1,2].includes(readerPreferences.fontSize)?readerPreferences.fontSize:0;
+readerPreferences.focus=readerPreferences.focus===true;
+const readerMedia=window.matchMedia?.('(max-width:950px)');
+let readerMobile=readerMedia?.matches||false,assistantSheetOpen=false;
+const chatViews=new Map();
+function chatView(id=S.article?.id){
+  if(!chatViews.has(id))chatViews.set(id,{top:0,follow:true,unread:false,key:null});
+  return chatViews.get(id);
+}
+const assistantVisible=()=>readerMobile?assistantSheetOpen:!readerPreferences.focus;
+const chatAtBottom=body=>body.scrollHeight-body.clientHeight-body.scrollTop<48;
+function rememberChatViewport(){
+  const body=$('.assistant-body[data-mode="chat"]');
+  if(!body||!(body.clientHeight>0))return;
+  const view=chatView(body.dataset.articleId);
+  view.top=body.scrollTop;view.follow=chatAtBottom(body);
+}
+function reconcileChatReply(){
+  if(!S.article)return;
+  const view=chatView(),answers=(S.article.messages||[]).filter(m=>m.role==='assistant');
+  const key=JSON.stringify([answers.length,answers.at(-1)?.id,answers.at(-1)?.text]);
+  if(view.key!==null&&view.key!==key)view.unread=true;
+  view.key=key;
+  if(assistantVisible()&&S.assistantTab==='chat'&&view.follow)view.unread=false;
+}
+function restoreChatViewport(){
+  const body=$('.assistant-body[data-mode="chat"]');
+  if(body){const view=chatView(body.dataset.articleId);body.scrollTop=view.follow?body.scrollHeight:view.top;}
+}
+function persistReaderPreferences(){try{localStorage.setItem('between.reader',JSON.stringify(readerPreferences));}catch{/* Preferences still apply in this session. */}}
+function updateReplyIndicators(){
+  const unread=S.article&&chatView().unread;
+  const jump=$('#new-chat-reply');if(jump)jump.hidden=!unread;
+  const toggle=$('#reader-assistant-toggle');
+  if(toggle){toggle.textContent=unread?'有新回复 ↓':readerMobile?'阅读助手':readerPreferences.focus?'打开助手':'专注阅读';toggle.setAttribute('aria-expanded',String(assistantVisible()));}
+}
+function syncReadingAssistant(){
+  const sheet=$('#assistant-sheet'),visible=Boolean(S.nav==='reading'&&S.article&&assistantVisible());
+  document.body.classList.toggle('assistant-sheet-open',readerMobile&&visible);
+  if(sheet){if(visible&&!sheet.open)sheet.showModal();else if(!visible&&sheet.open)sheet.close();}
+  else if($('#reading-assistant'))$('#reading-assistant').hidden=!visible;
+  $('.reading-layout')?.classList.toggle('reading-focused',!readerMobile&&!visible);
+  updateReplyIndicators();
+}
+function openReadingAssistant({latest=false}={}){
+  if(readerMobile)assistantSheetOpen=true;else{readerPreferences.focus=false;persistReaderPreferences();}
+  if(latest){S.assistantTab='chat';render();chatView().follow=true;chatView().unread=false;}
+  else syncReadingAssistant();
+  restoreChatViewport();
+  if(S.assistantTab==='chat'&&chatView().follow)chatView().unread=false;
+  updateReplyIndicators();
+}
+function closeReadingAssistant(){
+  rememberChatViewport();
+  if(readerMobile)assistantSheetOpen=false;else{readerPreferences.focus=true;persistReaderPreferences();}
+  syncReadingAssistant();$('#reader-assistant-toggle')?.focus({preventScroll:true});
+}
+function revealSelection(){
+  $('#selection-area').innerHTML=selectionMarkup();
+  openReadingAssistant();
+}
+readerMedia?.addEventListener('change',event=>{rememberChatViewport();readerMobile=event.matches;assistantSheetOpen=false;if(S.nav==='reading'&&S.article)render();});
+document.addEventListener('scroll',event=>{
+  const body=event.target;if(!body.matches?.('.assistant-body[data-mode="chat"]')||!(body.clientHeight>0))return;
+  const view=chatView(body.dataset.articleId);view.top=body.scrollTop;view.follow=chatAtBottom(body);
+  if(view.follow&&view.unread){view.unread=false;updateReplyIndicators();}
+},true);
+document.addEventListener('cancel',event=>{if(event.target.id==='assistant-sheet'){event.preventDefault();closeReadingAssistant();}},true);
+document.addEventListener('click',event=>{
+  if(event.target.id==='assistant-sheet'){const box=event.target.getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)closeReadingAssistant();}
+});
 function readerPage() {
   const a=S.article, paragraphs=a.text.split(/\n\n+/).filter(Boolean);
   const items=[['chat','解释与提问'],['quiz','理解测试']];
-  const assistantContent=`<div class="assistant-body">${S.assistantTab==='chat'?chatBody():quizBody()}</div><div id="selection-area">${selectionMarkup()}</div>${S.assistantTab==='chat'?`<form class="composer" id="chat-form"><label><span class="sr-only">向阅读助手提问</span><textarea id="compose" placeholder="这句话为什么这样表达？" rows="2" maxlength="2000">${esc(S.compose)}</textarea></label><div class="row"><select id="reply-language" aria-label="讲解语言">${options(['中文','English'],S.language)}</select><button type="submit" class="primary" ${busy('explain')?'disabled':''}>${busy('explain')?'思考中…':'发送提问'}</button></div></form>`:''}`;
-  return `<header class="page-head"><div class="row"><button class="ghost small" data-action="back-library">‹ 阅读书架</button><span class="badge neutral">${a.imported?'我的文章':'原文阅读'}</span></div><div class="row"><button class="ghost small" data-action="save-article" aria-pressed="${a.saved?'true':'false'}" data-id="${a.id}">${a.saved?'已收藏':'收藏文章'}</button><button class="small" data-action="import">导入文章</button></div></header><div class="reading-layout"><section class="reader" aria-label="英文原文"><div class="reader-content"><span class="eyebrow">${esc(a.source || 'English reading')}</span><h1>${esc(a.title)}</h1><div class="article-meta">${a.level?`<span class="badge">${esc(a.level)} · 估计</span>`:''}<span>${a.wordCount} words</span><span>约 ${Math.max(1,Math.round(a.wordCount/130))} 分钟</span>${source(a.url,'查看原文')}</div>${a.filters && (a.wordCount<a.filters.minWords || a.wordCount>a.filters.maxWords)?'<div class="hint-strip">正文篇幅超出筛选范围。</div>':''}<span id="paragraph-help" class="sr-only">按 Enter 选中段落，也可以拖选具体句子。</span><div class="article-text" id="article-text" lang="en">${paragraphs.map((p,i)=>`<p data-paragraph="${i}" id="para-${i}" tabindex="0" aria-describedby="paragraph-help" title="点选这一段，或拖选具体句子">${esc(p)}</p>`).join('')}</div><div class="reader-end"><button class="light" data-action="finish-reading">${a.completed?'已读完 ✓':'标记读完'}</button></div></div></section><aside class="assistant-panel" aria-label="AI 学习助手"><div class="assistant-head"><div class="row spread"><h2>一起读懂</h2><span class="badge neutral">AI 助手</span></div>${tabsMarkup('assistant','阅读助手',items,S.assistantTab)}</div>${tabPanelsMarkup('assistant',items,S.assistantTab,assistantContent,'assistant-tabpanel')}</aside></div>`;
+  const assistantContent=`<div class="assistant-body" data-article-id="${esc(a.id)}" data-mode="${S.assistantTab}">${S.assistantTab==='chat'?chatBody():quizBody()}</div><button type="button" id="new-chat-reply" class="new-chat-reply light small" data-action="latest-reply" ${chatView().unread?'':'hidden'}>有新回复 ↓</button><div id="selection-area">${selectionMarkup()}</div>${S.assistantTab==='chat'?`<form class="composer" id="chat-form"><label><span class="sr-only">向阅读助手提问</span><textarea id="compose" placeholder="这句话为什么这样表达？" rows="2" maxlength="2000">${esc(S.compose)}</textarea></label><div class="row"><select id="reply-language" aria-label="讲解语言">${options(['中文','English'],S.language)}</select><button type="submit" class="primary" ${busy('explain')?'disabled':''}>${busy('explain')?'思考中…':'发送提问'}</button></div></form>`:''}`;
+  const assistant=`<aside id="reading-assistant" class="assistant-panel" aria-label="AI 学习助手"><div class="assistant-head"><div class="row spread"><h2 id="assistant-title">一起读懂</h2><button type="button" id="close-reading-assistant" class="ghost small" data-action="close-assistant" aria-label="${readerMobile?'关闭阅读助手':'收起阅读助手'}">${readerMobile?'收起':'收起助手'}</button></div>${tabsMarkup('assistant','阅读助手',items,S.assistantTab)}</div>${tabPanelsMarkup('assistant',items,S.assistantTab,assistantContent,'assistant-tabpanel')}</aside>`;
+  return `<header class="page-head"><div class="row"><button class="ghost small" data-action="back-library">‹ 阅读书架</button><span class="badge neutral">${a.imported?'我的文章':'原文阅读'}</span></div><div class="row"><button class="ghost small" data-action="save-article" aria-pressed="${a.saved?'true':'false'}" data-id="${a.id}">${a.saved?'已收藏':'收藏文章'}</button><button class="small" data-action="import">导入文章</button></div></header><div class="reading-layout"><section class="reader reader-font-${readerPreferences.fontSize}" data-article-id="${esc(a.id)}" aria-label="英文原文"><div class="reader-toolbar"><div class="reader-font-controls" role="group" aria-label="正文字号"><button type="button" id="reader-font-smaller" class="ghost small" data-action="reader-font-smaller" aria-label="缩小正文字号" ${readerPreferences.fontSize===0?'disabled':''}>A−</button><span aria-live="polite">${['标准','大','更大'][readerPreferences.fontSize]}</span><button type="button" id="reader-font-larger" class="ghost small" data-action="reader-font-larger" aria-label="放大正文字号" ${readerPreferences.fontSize===2?'disabled':''}>A＋</button></div><button type="button" id="reader-assistant-toggle" class="light small" data-action="toggle-assistant" aria-controls="${readerMobile?'assistant-sheet':'reading-assistant'}" aria-expanded="${assistantVisible()}">${readerMobile?'阅读助手':readerPreferences.focus?'打开助手':'专注阅读'}</button></div><div class="reader-content"><span class="eyebrow">${esc(a.source || 'English reading')}</span><h1>${esc(a.title)}</h1><div class="article-meta">${a.level?`<span class="badge">${esc(a.level)} · 估计</span>`:''}<span>${a.wordCount} words</span><span>约 ${Math.max(1,Math.round(a.wordCount/130))} 分钟</span>${source(a.url,'查看原文')}</div>${a.filters && (a.wordCount<a.filters.minWords || a.wordCount>a.filters.maxWords)?'<div class="hint-strip">正文篇幅超出筛选范围。</div>':''}<span id="paragraph-help" class="sr-only">按 Enter 选中段落，也可以拖选具体句子。</span><div class="article-text" id="article-text" lang="en">${paragraphs.map((p,i)=>`<p data-paragraph="${i}" id="para-${i}" tabindex="0" aria-describedby="paragraph-help" title="点选这一段，或拖选具体句子">${esc(p)}</p>`).join('')}</div><div class="reader-end"><button class="light" data-action="finish-reading">${a.completed?'已读完 ✓':'标记读完'}</button></div></div></section>${readerMobile?`<dialog id="assistant-sheet" aria-labelledby="assistant-title">${assistant}</dialog>`:assistant}</div>`;
 }
 function selectionMarkup() { return S.selection?`<div class="selection-box"><div class="selection-label"><span>已选中原文</span><span><button class="ghost small" data-action="explain-selection" ${busy('explain')?'disabled':''}>解释</button>${S.selection.split(/\s+/).length<=6?`<button class="ghost small" data-action="save-selection" ${busy('word')?'disabled':''}>收藏生词</button>`:''}<button class="icon-button" data-action="clear-selection" aria-label="清除选中文字">×</button></span></div>${esc(S.selection)}</div>`:''; }
 function chatBody() {
@@ -350,11 +507,11 @@ function apiSettingsMarkup() {
   return `<div class="api-settings"><p class="provider-caption">兼容 OpenAI · 用于讲解、出题与批改</p><div class="api-grid"><label>API 地址<input id="api-base-url" name="apiBaseUrl" data-api-field="baseUrl" type="url" value="${esc(d.baseUrl)}" placeholder="https://api.example.com/v1" autocomplete="off" spellcheck="false"></label><label>API Key<input id="api-key" name="apiKey" data-api-field="apiKey" type="password" value="${esc(d.apiKey)}" placeholder="${hasSavedApiKey()?'已保存，留空保留':'输入 API Key'}" autocomplete="new-password" spellcheck="false"><span class="field-note" id="api-key-hint">${keyHint}</span></label><label class="api-model-field">模型<input id="api-model" name="apiModel" data-api-field="model" value="${esc(d.model)}" placeholder="输入模型名称，或从列表选择" autocomplete="off" spellcheck="false"></label>${models.length?`<label>可用模型<select id="api-model-picker" aria-label="选择 API 模型"><option value="">从列表选择</option>${models.map(m=>`<option value="${esc(m.id)}" ${d.model===m.id?'selected':''}>${esc(m.name||m.id)}</option>`).join('')}</select></label>`:''}</div>${generationControls('api')}<div class="api-actions"><div class="row wrap"><button type="button" class="light" data-action="refresh-api-models">${S.apiAction==='models'?'获取中…':'获取可用模型'}</button><button type="button" data-action="test-api">${S.apiAction==='test'?'测试中…':'测试连接'}</button>${models.length?`<span class="field-note">${models.length} 个模型</span>`:''}</div>${S.settings.api?.hasKey?`<label class="check"><input id="api-clear-key" data-api-field="clearKey" type="checkbox" ${d.clearKey?'checked':''}>清除已存密钥</label>`:''}</div>${S.apiError?`<p class="model-error api-feedback" role="alert">${esc(S.apiError)}</p>`:S.apiMessage?`<p class="api-feedback muted" role="status">${esc(S.apiMessage)}</p>`:''}</div>`;
 }
 function settingsPage() {
-  if(!S.settingsDraft)S.settingsDraft={model:S.settings.model||'',tutorModel:S.settings.tutorModel||'',tutorProvider:S.settings.tutorProvider||'codex',reasoningEffort:S.settings.reasoningEffort||'',fastMode:S.settings.fastMode===true,tutorReasoningEffort:S.settings.tutorReasoningEffort||'',tutorFastMode:S.settings.tutorFastMode===true};
+  if(!S.settingsDraft)S.settingsDraft=modelPreferences(S.settings);
   if(!S.apiDraft)S.apiDraft={baseUrl:S.settings.api?.baseUrl||'',model:S.settings.api?.model||'',apiKey:'',clearKey:false,reasoningEffort:S.settings.api?.reasoningEffort||'',fastMode:S.settings.api?.fastMode===true};
   const d=S.settingsDraft,c=S.modelCatalog,locked=settingsBusy();
   const updated=c.fetchedAt?new Date(c.fetchedAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'';
-  return `<header class="page-head"><div><h1>学习偏好</h1></div><span class="head-mark">Make it yours.</span></header><section class="panel model-panel" aria-labelledby="model-title"><div class="panel-head"><h2 id="model-title">模型与接口</h2><button type="button" class="light" data-action="refresh-models" ${locked?'disabled':''}>${S.modelsLoading?'获取中…':'获取 Codex 模型'}</button></div>${S.settings.api?.warning?`<p class="model-error" role="alert">${esc(S.settings.api.warning)}</p>`:''}${S.modelsError?`<p class="model-error" role="alert">${esc(S.modelsError)}</p>`:''}<form id="settings-form"><fieldset class="settings-fields" ${locked?'disabled':''}><section class="model-block" aria-labelledby="retrieval-model-title"><div class="model-block-head"><h3 id="retrieval-model-title">检索模型</h3><span class="badge neutral">Codex</span></div><div class="model-grid"><label for="search-model">模型<select name="model" id="search-model">${modelOptions(d.model,'Codex 默认')}</select></label>${generationControls('search')}</div></section><section class="model-block" aria-labelledby="reading-model-title"><div class="model-block-head"><h3 id="reading-model-title">阅读助手</h3><label class="provider-select" for="tutor-provider"><span class="sr-only">阅读助手接口</span><select name="tutorProvider" id="tutor-provider"><option value="codex" ${d.tutorProvider==='codex'?'selected':''}>Codex</option><option value="api" ${d.tutorProvider==='api'?'selected':''}>自定义 API</option></select></label></div>${d.tutorProvider==='api'?apiSettingsMarkup():`<div class="model-grid"><label for="tutor-model">讲解与出题模型<select name="tutorModel" id="tutor-model">${modelOptions(d.tutorModel,'沿用检索模型')}</select></label>${generationControls('tutor')}</div><details class="api-config-details" id="api-config-details" ${S.apiConfigOpen?'open':''}><summary>自定义 API</summary>${apiSettingsMarkup()}</details>`}</section><div class="model-footer"><span class="muted" role="status">${S.modelsLoading?'正在获取 Codex 模型…':c.fetchedAt?`${c.models.length} 个 Codex 模型 · ${updated} 获取`:'检索由 Codex 完成'}</span><button type="submit" class="primary">${S.settingsSaving?'保存中…':'保存偏好'}</button></div></fieldset></form><details class="connection-details"><summary>Codex · ${S.connection.authenticated?'已连接':'未连接'}</summary><div class="row wrap advanced"><span class="muted">${esc(S.connection.version||'未检测到 CLI')}</span><button class="ghost small" data-action="check-connection">刷新连接</button><button class="ghost small" data-action="test-connection" ${busy('connection')?'disabled':''}>测试连接</button></div>${S.connection.authenticated?'':'<p class="muted advanced">在终端运行 <code>codex login</code> 后重试。</p>'}</details></section>${memoryPanel()}`;
+  return `<header class="page-head"><div><h1>学习偏好</h1></div><span class="head-mark">Make it yours.</span></header><section class="panel model-panel" aria-labelledby="model-title"><div class="panel-head"><h2 id="model-title">模型与接口</h2><button type="button" class="light" data-action="refresh-models" ${locked?'disabled':''}>${S.modelsLoading?'获取中…':'获取 Codex 模型'}</button></div>${S.settings.api?.warning?`<p class="model-error" role="alert">${esc(S.settings.api.warning)}</p>`:''}${S.modelsError?`<p class="model-error" role="alert">${esc(S.modelsError)}</p>`:''}<form id="settings-form"><fieldset class="settings-fields" ${locked?'disabled':''}><section class="model-block" aria-labelledby="retrieval-model-title"><div class="model-block-head"><h3 id="retrieval-model-title">检索模型</h3><span class="badge neutral">Codex</span></div><div class="model-grid"><label for="search-model">模型<select name="model" id="search-model">${modelOptions(d.model,'Codex 默认')}</select></label>${generationControls('search')}</div></section><section class="model-block" aria-labelledby="reading-model-title"><div class="model-block-head"><h3 id="reading-model-title">阅读助手</h3><label class="provider-select" for="tutor-provider"><span class="sr-only">阅读助手接口</span><select name="tutorProvider" id="tutor-provider"><option value="codex" ${d.tutorProvider==='codex'?'selected':''}>Codex</option><option value="api" ${d.tutorProvider==='api'?'selected':''}>自定义 API</option></select></label></div>${d.tutorProvider==='api'?apiSettingsMarkup():`<div class="model-grid"><label for="tutor-model">讲解与出题模型<select name="tutorModel" id="tutor-model">${modelOptions(d.tutorModel,'沿用检索模型')}</select></label>${generationControls('tutor')}</div><details class="api-config-details" id="api-config-details" ${S.apiConfigOpen?'open':''}><summary>自定义 API</summary>${apiSettingsMarkup()}</details>`}</section><p class="model-catalog-note muted">${S.modelsLoading?'正在获取 Codex 模型…':c.fetchedAt?`${c.models.length} 个 Codex 模型 · ${updated} 获取`:'检索由 Codex 完成'}</p><div id="settings-save-bar" class="model-footer settings-save-bar">${settingsFooterMarkup()}</div></fieldset></form><details class="connection-details"><summary>Codex · ${S.connection.authenticated?'已连接':'未连接'}</summary><div class="row wrap advanced"><span class="muted">${esc(S.connection.version||'未检测到 CLI')}</span><button class="ghost small" data-action="check-connection">刷新连接</button><button class="ghost small" data-action="test-connection" ${busy('connection')?'disabled':''}>测试连接</button></div>${S.connection.authenticated?'':'<p class="muted advanced">在终端运行 <code>codex login</code> 后重试。</p>'}</details></section>${memoryPanel()}`;
 }
 
 const polling=new Set();
@@ -402,7 +559,21 @@ async function handleResult(job){
   if(job.type==='connection')toast(r.ok?'连接正常':r.message);
   taskOrigins.delete(job.id);
 }
-async function loadArticle(id,{recordVisit=true}={}){rememberDraft();const request=++articleRequest;const article=await api(`/articles/${id}`);if(request!==articleRequest)return;S.article=article;if(recordVisit)void api(`/articles/${id}/visit`,{}).catch(e=>toast(e.message));S.nav='reading';Object.assign(S,{selection:'',selectionContext:'',compose:'',assistantTab:'chat'},readDrafts.get(id)||{});history.replaceState(null,'',`#read/${id}`);render();window.scrollTo(0,0);requestAnimationFrame(()=>{const reader=$('.reader'), target=document.getElementById(`para-${article.paragraph||0}`);if(reader){reader.scrollTop=article.paragraph>0&&target?target.getBoundingClientRect().top-reader.getBoundingClientRect().top+reader.scrollTop-24:0;}window.scrollTo(0,0);});}
+function updateReadingProgress(id,updated){
+  if(!updated.startedAt)return;
+  const listed=S.articles.find(a=>a.id===id),changed=listed&&listed.startedAt!==updated.startedAt;
+  const fields={startedAt:updated.startedAt,...(updated.paragraph!==undefined?{paragraph:updated.paragraph}:{})};
+  if(listed)Object.assign(listed,fields);if(S.article?.id===id)Object.assign(S.article,fields);
+  if(changed&&S.nav==='reading'&&!S.article)render();
+}
+async function loadArticle(id,{recordVisit=true,fromStart=false}={}){
+  rememberDraft();const request=++articleRequest;const article=await api(`/articles/${id}`);if(request!==articleRequest)return;
+  S.article=article;assistantSheetOpen=false;
+  if(recordVisit)void api(`/articles/${id}/visit`,{}).then(visited=>updateReadingProgress(id,visited)).catch(e=>toast(e.message));
+  S.nav='reading';Object.assign(S,{selection:'',selectionContext:'',compose:'',assistantTab:'chat'},readDrafts.get(id)||{});
+  history.replaceState(null,'',`#read/${id}`);render();window.scrollTo(0,0);
+  requestAnimationFrame(()=>{if(request!==articleRequest||S.article?.id!==id)return;const reader=$('.reader'),target=document.getElementById(`para-${article.paragraph||0}`);if(reader){reader.scrollTop=!fromStart&&article.paragraph>0&&target?target.getBoundingClientRect().top-reader.getBoundingClientRect().top+reader.scrollTop-76:0;}window.scrollTo(0,0);});
+}
 async function navigate(nav){rememberDraft();const request=++articleRequest;S.nav=nav;S.error='';if(nav==='reading'){S.article=null;S.articleIds=null;}history.replaceState(null,'',`#${nav}`);render();$('#main')?.focus({preventScroll:true});window.scrollTo(0,0);if(nav==='curate'||nav==='learning'){await refresh();activeJobs().forEach(j=>void watchJob(j.id));if(request===articleRequest&&S.nav===nav)render();}}
 function wordRoute(id){articleRequest++;history.replaceState(null,'',`#words/deck/${encodeURIComponent(id)}`);}
 function openSelection(id,kind){
@@ -413,7 +584,7 @@ function openSelection(id,kind){
   else{S.nav='reading';S.article=null;S.articleIds=part.articleIds;S.readTab='find';}
   history.replaceState(null,'',`#${S.nav}/selection/${encodeURIComponent(id)}`);render();window.scrollTo(0,0);
 }
-function showEvidence(text){const paragraphs=[...document.querySelectorAll('[data-paragraph]')];const normalize=t=>t.toLowerCase().replace(/[“”"‘’]/g,'').replace(/\s+/g,' ').trim();const found=paragraphs.find(p=>normalize(p.textContent).includes(normalize(text)));paragraphs.forEach(p=>p.classList.remove('current'));if(found){found.classList.add('current');const reader=$('.reader');reader.scrollTo({top:reader.scrollTop+found.getBoundingClientRect().top-reader.getBoundingClientRect().top-reader.clientHeight/3,behavior:'smooth'});}else toast('这段依据涉及多个段落，请在原文中核对。');}
+function showEvidence(text){const paragraphs=[...document.querySelectorAll('[data-paragraph]')];const normalize=t=>t.toLowerCase().replace(/[“”"‘’]/g,'').replace(/\s+/g,' ').trim();const found=paragraphs.find(p=>normalize(p.textContent).includes(normalize(text)));paragraphs.forEach(p=>p.classList.remove('current'));if(found){if(readerMobile)closeReadingAssistant();found.classList.add('current');const reader=$('.reader');reader.scrollTo({top:reader.scrollTop+found.getBoundingClientRect().top-reader.getBoundingClientRect().top-reader.clientHeight/3,behavior:'smooth'});found.focus({preventScroll:true});}else toast('这段依据涉及多个段落，请在原文中核对。');}
 
 function updateSettingsDraft(el) {
   if(el.form?.id!=='settings-form')return;
@@ -428,11 +599,12 @@ function updateSettingsDraft(el) {
     S.apiDraft[field]=el.type==='checkbox'?el.checked:el.value;
     S.apiError='';S.apiMessage='';
     if(field==='baseUrl'&&oldEndpoint!==apiEndpoint(el.value)){S.apiDraft.apiKey='';S.apiDraft.reasoningEffort='';S.apiDraft.fastMode=false;S.apiCatalog={models:[],fetchedAt:null};render();}
-    if(field==='model'&&oldModel!==el.value){S.apiDraft.reasoningEffort='';S.apiDraft.fastMode=false;}
+    if(field==='model'&&oldModel.trim()!==el.value.trim()){S.apiDraft.reasoningEffort='';S.apiDraft.fastMode=false;}
     if(field==='clearKey'&&el.checked)S.apiDraft.apiKey='';
     if(field==='apiKey'&&el.value)S.apiDraft.clearKey=false;
   }
   if(el.id==='api-model-picker'&&el.value){if(S.apiDraft.model!==el.value){S.apiDraft.reasoningEffort='';S.apiDraft.fastMode=false;}S.apiDraft.model=el.value;S.apiError='';S.apiMessage='';}
+  updateSettingsFooter();
 }
 document.addEventListener('toggle',event=>{if(event.target.id==='api-config-details')S.apiConfigOpen=event.target.open;if(event.target.id==='curation-defaults')S.curationDefaultsOpen=event.target.open;if(event.target.id==='word-search-details'&&event.target.isConnected)S.wordSearchOpen=event.target.open;if(event.target.id==='article-search-details'&&event.target.isConnected)S.articleSearchOpen=event.target.open;},true);
 function updateWordSearch(el) {
@@ -443,7 +615,7 @@ document.addEventListener('compositionend',event=>updateWordSearch(event.target)
 document.addEventListener('input',event=>{
   const el=event.target;
   if(['word-list-query','deck-query'].includes(el.id)){if(!event.isComposing)updateWordSearch(el);return;}
-  if(el.dataset.curation){S.curationDraft[el.dataset.curation]=el.value;persistCurationDraft();}
+  if(el.dataset.curation){S.curationDraft[el.dataset.curation]=el.value;persistCurationDraft();const summary=$('#curation-defaults-summary');if(summary)summary.textContent=curationDefaultsSummary();}
   if(el.dataset.filter){const group=el.dataset.filter;const f=group==='word'?S.wordFilters:S.articleFilters;f[el.name]=el.type==='checkbox'?el.checked:el.value;localStorage.setItem(`between.${group}Filters`,JSON.stringify(f));}
   updateSettingsDraft(el);
   if(el.id==='memory-notes')S.memoryDraft.notes=el.value;
@@ -459,7 +631,7 @@ document.addEventListener('change',event=>{const el=event.target;updateSettingsD
   if(el.id==='reply-language')S.language=el.value;if(el.id==='quiz-type')S.quizType=el.value;if(el.id==='quiz-picker'){S.quizId=el.value;render();}});
 document.addEventListener('click',async event=>{
   if(event.target.closest('.skip-link')){event.preventDefault();$('#main')?.focus();return;}
-  const paragraph=event.target.closest('[data-paragraph]');if(paragraph&&!window.getSelection()?.toString()){S.selection=paragraph.textContent.slice(0,6000);S.selectionContext=S.selection;$('#selection-area').innerHTML=selectionMarkup();return;}
+  const paragraph=event.target.closest('[data-paragraph]');if(paragraph&&!window.getSelection()?.toString()){S.selection=paragraph.textContent.slice(0,6000);S.selectionContext=S.selection;revealSelection();return;}
   const el=event.target.closest('button');if(!el||el.disabled)return;
   try{
     if(el.dataset.nav){if(el.dataset.learningAll==='words')S.wordTab='find';if(el.dataset.learningAll==='reading')S.readTab='find';await navigate(el.dataset.nav);return;}
@@ -469,7 +641,7 @@ document.addEventListener('click',async event=>{
     if(el.dataset.activityDate){selectActivityDate(el.dataset.activityDate);return;}
     if(el.dataset.wordTab){S.wordTab=el.dataset.wordTab;S.revealed=false;render();return;}
     if(el.dataset.readTab){S.readTab=el.dataset.readTab;render();return;}
-    if(el.dataset.assistantTab){S.assistantTab=el.dataset.assistantTab;render();if($('.assistant-body'))$('.assistant-body').scrollTop=0;return;}
+    if(el.dataset.assistantTab){S.assistantTab=el.dataset.assistantTab;render();return;}
     if(el.dataset.mode){S.cardMode=el.dataset.mode;S.revealed=false;S.spell='';render();return;}
     if(el.dataset.evidence){showEvidence(el.dataset.evidence);return;}
     if(el.dataset.prompt){if(el.dataset.prompt.startsWith('请解释选中')&&!S.selection){toast('先在左侧选中你想理解的句子。');return;}S.compose=el.dataset.prompt;render();$('#compose')?.focus();return;}
@@ -480,6 +652,10 @@ document.addEventListener('click',async event=>{
     }
     const id=el.dataset.id;
     switch(el.dataset.action){
+      case'toggle-assistant':if(chatView().unread)openReadingAssistant({latest:true});else if(assistantVisible())closeReadingAssistant();else openReadingAssistant();break;
+      case'close-assistant':closeReadingAssistant();break;
+      case'latest-reply':openReadingAssistant({latest:true});break;
+      case'reader-font-smaller':case'reader-font-larger':readerPreferences.fontSize=Math.max(0,Math.min(2,readerPreferences.fontSize+(el.dataset.action.endsWith('larger')?1:-1)));persistReaderPreferences();render();break;
       case'toggle-sidebar':toggleSidebar();break;
       case'open-deck-library':S.deckLibrary={query:'',page:1};$('#deck-query').value='';renderDeckLibrary();$('#deck-dialog').showModal();$('#deck-query').focus();break;
       case'close-deck-library':$('#deck-dialog').close();$('#deck-picker')?.focus();break;
@@ -492,7 +668,8 @@ document.addEventListener('click',async event=>{
       case'selection-words':openSelection(id,'words');break;
       case'selection-articles':openSelection(id,'articles');break;
       case'refresh-models':{if(settingsBusy())break;S.modelsLoading=true;S.modelsError='';render();try{S.modelCatalog=await api('/models',{});const normalized=normalizeCodexDraft();toast(`已获取 ${S.modelCatalog.models.length} 个模型${normalized?'，不兼容选项已恢复默认':''}`);}catch(error){S.modelsError=error.message;}finally{S.modelsLoading=false;render();}break;}
-      case'refresh-api-models':case'test-api':{if(settingsBusy())break;const payload=apiDraftPayload();S.apiAction=el.dataset.action==='refresh-api-models'?'models':'test';S.apiError='';S.apiMessage='';render();try{const result=await api(`/provider/${S.apiAction}`,payload);if(S.apiAction==='models'){S.apiCatalog=result;const normalized=normalizeGenerationDraft(S.apiDraft,selectedApiModel(),'reasoningEffort','fastMode',true);S.apiMessage=`已获取 ${result.models.length} 个模型${normalized?'，不兼容选项已恢复默认':''}`;}else S.apiMessage=result.message||'连接正常。';}catch(error){S.apiError=error.message;}finally{S.apiAction='';render();}break;}
+      case'refresh-api-models':case'test-api':{if(settingsBusy())break;const payload=apiDraftPayload();S.apiAction=el.dataset.action==='refresh-api-models'?'models':'test';S.apiError='';S.apiMessage='';render();try{const result=await api(`/provider/${S.apiAction}`,payload);if(S.apiAction==='models'){S.apiCatalog=result;const normalized=normalizeGenerationDraft(S.apiDraft,selectedApiModel(),'reasoningEffort','fastMode',true);S.apiMessage=`已获取 ${result.models.length} 个模型${normalized?'，不兼容选项已恢复默认':''}`;}else S.apiMessage=`连接测试通过 · ${settingsDirty()?'更改尚未保存':'已保存配置'}`;}catch(error){S.apiError=error.message;}finally{S.apiAction='';render();}break;}
+      case'reset-settings-draft':if(!settingsBusy()){S.settingsDraft=null;S.apiDraft=null;S.apiError='';S.apiMessage='';S.apiCatalog={models:[],fetchedAt:null};render();$('#search-model')?.focus({preventScroll:true});toast('已恢复保存的偏好');}break;
       case'refresh-memory':S.memory=await api('/memory');render();toast('预览已刷新，草稿已保留');break;
       case'reset-memory-draft':S.memory=await api('/memory');S.memoryDraft=null;render();toast('已载入记忆');break;
       case'dismiss-error':S.error='';render();break;
@@ -505,7 +682,7 @@ document.addEventListener('click',async event=>{
       case'replace-word':await runTask('words',{...deck().filters,deckId:deck().id,replaceWordId:id});break;
       case'study-saved':case'review':{const d=await api('/decks/review',{allSaved:el.dataset.action==='study-saved'});await refresh();S.deckId=d.id;S.nav='words';S.wordTab='study';S.revealed=false;wordRoute(d.id);render();break;}
       case'continue-deck':S.deckId=id;S.nav='words';S.wordTab=deck().progress.finished?'find':'study';S.revealed=false;wordRoute(id);render();break;
-      case'open-article':{const a=S.articles.find(a=>a.id===id);if(a.hasText)await loadArticle(id);else await runTask('open',{articleId:id});break;}
+      case'open-article':{const a=S.articles.find(a=>a.id===id);if(a.hasText)await loadArticle(id,{fromStart:Boolean(a.completed)});else await runTask('open',{articleId:id});break;}
       case'save-article':{const a=S.articles.find(a=>a.id===id);await api(`/articles/${id}`,{saved:!a.saved});await refresh();if(S.article?.id===id)S.article.saved=!a.saved;render();break;}
       case'back-library':rememberDraft();articleRequest++;S.article=null;history.replaceState(null,'','#reading');render();window.scrollTo(0,0);break;
       case'clear-selection':S.selection='';S.selectionContext='';$('#selection-area').innerHTML='';break;
@@ -541,7 +718,7 @@ document.addEventListener('submit',async event=>{
     if(form.id==='quiz-form')await runTask('quiz',{articleId:S.article.id,selection:S.selection,context:S.selectionContext,count:S.quizCount,questionType:S.quizType,level:S.article.level});
     if(form.id==='grade-form'){const answers=Object.fromEntries(new FormData(form));await runTask('grade',{articleId:S.article.id,quizId:form.dataset.id,answers});}
     if(form.id==='memory-form'){const submit=form.querySelector('[type=submit]');submit.disabled=true;try{const payload=S.memory.revision?S.memoryDraft:{...S.memoryDraft,notes:'',revision:''};S.memory=await api('/memory',payload);if(S.memory.revision)S.memoryDraft=null;if(!S.memory.personalize)S.directions={personalized:false,items:[],note:''};await refresh();render();toast(S.memory.warning||'记忆已保存');}finally{submit.disabled=false;}}
-    if(form.id==='settings-form'){if(settingsBusy())return;const values={...S.settingsDraft},provider=apiDraftPayload();if(values.tutorProvider==='api'||provider.baseUrl||provider.model||provider.apiKey||provider.clearKey||S.settings.api?.baseUrl)values.api=provider;S.settingsSaving=true;S.apiError='';render();try{const savedSettings=await api('/settings',values);S.settings=savedSettings;S.apiDraft.apiKey='';S.apiDraft.clearKey=false;await refresh();S.settingsDraft=null;S.apiDraft=null;toast('学习偏好已保存');}catch(error){S.apiError=error.message;toast(error.message);}finally{S.settingsSaving=false;render();}}
+    if(form.id==='settings-form'){if(settingsBusy()||!settingsDirty())return;const values={...S.settingsDraft},provider=apiDraftPayload();if(values.tutorProvider==='api'||provider.baseUrl||provider.model||provider.apiKey||provider.clearKey||S.settings.api?.baseUrl)values.api=provider;S.settingsSaving=true;S.apiError='';render();try{const savedSettings=await api('/settings',values);S.settings=savedSettings;S.settingsDraft=null;S.apiDraft=null;S.apiMessage='';toast('学习偏好已保存');}catch(error){S.apiError=error.message;toast(error.message);}finally{S.settingsSaving=false;render();}}
     if(form.id==='import-form'){const submit=form.querySelector('[type=submit]');submit.disabled=true;try{const article=await api('/articles/import',Object.fromEntries(new FormData(form)));await refresh();$('#import-dialog').close();form.reset();await loadArticle(article.id);}finally{submit.disabled=false;}}
   }catch(error){S.error=error.message;toast(error.message);render();}
 });
@@ -583,15 +760,37 @@ document.addEventListener('keydown',event=>{
     if(S.revealed&&['1','2','3'].includes(event.key)){event.preventDefault();document.querySelectorAll('[data-rating]')[Number(event.key)-1]?.click();}
   }
 });
-function captureSelection(){const selection=window.getSelection();if(!selection?.rangeCount||selection.isCollapsed)return;const container=$('#article-text');if(!container?.contains(selection.anchorNode)||!container.contains(selection.focusNode))return;const text=selection.toString().trim();if(text.length>6000){toast('选中的内容较长，请缩小到 6000 字符以内。');return;}if(text&&S.article?.text.includes(text)){S.selection=text;const parent=selection.anchorNode?.nodeType===1?selection.anchorNode:selection.anchorNode?.parentElement;const context=parent?.closest('[data-paragraph]')?.textContent;S.selectionContext=context?.includes(text)&&context.length<=6000?context:text;$('#selection-area').innerHTML=selectionMarkup();}}
-document.addEventListener('pointerup',()=>setTimeout(captureSelection,0));document.addEventListener('keyup',captureSelection);
+function captureSelection(){const selection=window.getSelection();if(!selection?.rangeCount||selection.isCollapsed)return;const container=$('#article-text');if(!container?.contains(selection.anchorNode)||!container.contains(selection.focusNode))return;const text=selection.toString().trim();if(text.length>6000){toast('选中的内容较长，请缩小到 6000 字符以内。');return;}if(text&&S.article?.text.includes(text)){S.selection=text;const parent=selection.anchorNode?.nodeType===1?selection.anchorNode:selection.anchorNode?.parentElement;const context=parent?.closest('[data-paragraph]')?.textContent;S.selectionContext=context?.includes(text)&&context.length<=6000?context:text;revealSelection();}}
+document.addEventListener('pointerup',event=>{if(event.target.closest?.('#article-text'))setTimeout(captureSelection,0);});
+document.addEventListener('keyup',event=>{if(event.key!=='Escape'&&event.target.closest?.('#article-text'))captureSelection();});
 let progressTimer, observer;
 function observeReading(){
   observer?.disconnect();const reader=$('.reader');if(!reader||!S.article)return;
   const articleId=S.article.id;
-  observer=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>Number(a.target.dataset.paragraph)-Number(b.target.dataset.paragraph));if(!visible.length)return;const paragraph=Number(visible[0].target.dataset.paragraph);clearTimeout(progressTimer);progressTimer=setTimeout(()=>{void api(`/articles/${articleId}`,{paragraph}).catch(()=>{});},750);},{root:reader,rootMargin:'-10% 0px -65% 0px',threshold:0});
+  observer=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>Number(a.target.dataset.paragraph)-Number(b.target.dataset.paragraph));if(!visible.length)return;const paragraph=Number(visible[0].target.dataset.paragraph);clearTimeout(progressTimer);progressTimer=setTimeout(()=>{void api(`/articles/${articleId}`,{paragraph}).then(updated=>updateReadingProgress(articleId,updated)).catch(()=>{});},750);},{root:reader,rootMargin:'-10% 0px -65% 0px',threshold:0});
   document.querySelectorAll('[data-paragraph]').forEach(p=>observer.observe(p));
 }
+function updateArticleLibraryQuery(el) {
+  if(el.id!=='article-library-query')return;
+  const view=articleBrowse();view.query=el.value;view.page=1;render();
+}
+document.addEventListener('compositionend',event=>updateArticleLibraryQuery(event.target));
+document.addEventListener('input',event=>{if(!event.isComposing)updateArticleLibraryQuery(event.target);});
+document.addEventListener('change',event=>{
+  if(event.target.id!=='article-library-status'||!['all','unread','reading','completed'].includes(event.target.value))return;
+  const view=articleBrowse();view.status=event.target.value;view.page=1;render();
+});
+document.addEventListener('click',event=>{
+  const button=event.target.closest('button');if(!button||button.disabled||S.nav!=='reading'||S.article)return;
+  const action=button.dataset.action,libraryAction=button.dataset.libraryAction;
+  if(action==='article-page-prev'||action==='article-page-next'){
+    articleBrowse().page+=action.endsWith('next')?1:-1;render();$('#article-library')?.scrollIntoView({block:'start'});
+  }else if(libraryAction==='clear'){
+    Object.assign(articleBrowse(),{query:'',status:'all',page:1});render();$('#article-library-query')?.focus();
+  }else if(libraryAction==='all'){
+    S.articleIds=null;history.replaceState(null,'','#reading');render();$('#article-library-query')?.focus();
+  }
+});
 async function boot(){
   try{
     Object.assign(S,await api('/bootstrap'));S.deckId=S.settings.lastDeck;
