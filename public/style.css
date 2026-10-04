@@ -351,7 +351,10 @@ button:is([data-action="save-word"],[data-action="save-article"])[aria-pressed="
 .new-chat-reply[hidden]{display:none}
 #assistant-sheet{padding:0;width:100%;max-width:760px;height:min(760px,85dvh);max-height:85dvh;margin:auto auto 0;border-radius:20px 20px 0 0;overflow:hidden}
 #assistant-sheet:not([open]){display:none}
-#assistant-sheet .assistant-panel{height:100%;min-height:0;max-height:none;border:0;border-radius:0;padding-bottom:env(safe-area-inset-bottom)}
+#assistant-sheet .assistant-panel{height:100%;min-height:0;max-height:none;border:0;border-radius:0;padding-bottom:env(safe-area-inset-bottom);overflow-y:auto;overscroll-behavior:contain}
+/* Keep chat scrollable while short screens can scroll the whole sheet to its controls. */
+#assistant-sheet .assistant-body{flex:1 0 120px;overscroll-behavior:auto}
+#assistant-feedback{flex-shrink:0;margin:14px var(--assistant-gutter)}
 .assistant-sheet-open{overflow:hidden}
 @media(max-width:950px){
   .reading-layout{height:calc(100dvh - 158px);min-height:340px}

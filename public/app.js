@@ -79,7 +79,7 @@ function shell(content) {
   return `<div class="shell ${S.sidebarCollapsed?'sidebar-collapsed':''}"><aside class="sidebar" id="sidebar"><div class="brand"><span class="brand-icon">b.</span><div class="brand-text"><div class="brand-name">句<span class="brand-pause">。</span>间</div><div class="brand-en">Between</div></div></div>${sidebarToggleMarkup()}<div class="nav-label">学习空间</div><nav class="nav" aria-label="主导航">${[['curate','spark','选材中心'],['words','words','单词学习'],['reading','book','英文阅读'],['learning','activity','我的学习'],['settings','settings','设置']].map(([id,ic,label]) => `<button type="button" id="nav-${id}" data-nav="${id}" class="${S.nav === id ? 'active' : ''}" title="${label}" aria-label="${label}" ${S.nav === id ? 'aria-current="page"' : ''}>${icon(ic)}<span class="nav-label-text">${label}</span><span class="nav-tooltip" aria-hidden="true">${label}</span>${id === 'learning' && due().length ? `<span class="count">${due().length}</span>`:''}</button>`).join('')}</nav><div class="sidebar-footer"><div class="connection-pill"><span class="status-dot ${S.connection.authenticated ? '' : 'off'}"></span><span>${S.connection.authenticated ? S.settings.tutorProvider==='api'?'Codex 检索 · API 助手':'Codex 已连接' : '等待连接 Codex'}</span></div><div class="small-note">一点积累，自成语感。</div></div></aside><main class="workspace ${reading ? 'reading-workspace' : ''}" id="main" tabindex="-1"><div class="topbar"><span>我的学习空间 <span aria-hidden="true">/</span> <strong>${({curate:'选材中心',words:'单词学习',reading:'英文阅读',learning:'我的学习',settings:'偏好设置'})[S.nav]}</strong></span><span class="date">${new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'})}</span></div><div id="jobs">${jobsMarkup()}</div>${S.error ? `<div class="hint-strip error-strip" role="alert">${esc(S.error)} <button class="ghost small" data-action="dismiss-error">关闭</button></div>` : ''}${content}</main></div>`;
 }
 function render() {
-  rememberChatViewport();
+  rememberAssistantViewport();
   reconcileChatReply();
   const oldReader=$('.reader'),readerScroll=oldReader&&oldReader.dataset.articleId===S.article?.id?oldReader.scrollTop||0:0,activityScroll=$('.activity-scroll')?.scrollLeft;
   const focus = document.activeElement?.id, cursor = document.activeElement?.selectionStart;
@@ -87,7 +87,7 @@ function render() {
   if ($('.reader')) $('.reader').scrollTop = readerScroll;
   if ($('.activity-scroll')) $('.activity-scroll').scrollLeft=activityScroll??$('.activity-scroll').scrollWidth;
   syncReadingAssistant();
-  restoreChatViewport();
+  restoreAssistantViewport();
   if (focus && document.getElementById(focus)) { const el = document.getElementById(focus); el.focus({preventScroll:true}); if (cursor != null && el.setSelectionRange) el.setSelectionRange(cursor, cursor); }
   observeReading();
   if($('#deck-dialog')?.open)renderDeckLibrary();
@@ -254,16 +254,17 @@ readerPreferences.fontSize=[0,1,2].includes(readerPreferences.fontSize)?readerPr
 readerPreferences.focus=readerPreferences.focus===true;
 const readerMedia=window.matchMedia?.('(max-width:950px)');
 let readerMobile=readerMedia?.matches||false,assistantSheetOpen=false;
-const chatViews=new Map();
+const chatViews=new Map(),quizViews=new Map();
 function chatView(id=S.article?.id){
   if(!chatViews.has(id))chatViews.set(id,{top:0,follow:true,unread:false,key:null});
   return chatViews.get(id);
 }
 const assistantVisible=()=>readerMobile?assistantSheetOpen:!readerPreferences.focus;
 const chatAtBottom=body=>body.scrollHeight-body.clientHeight-body.scrollTop<48;
-function rememberChatViewport(){
-  const body=$('.assistant-body[data-mode="chat"]');
+function quizViewportKey(body){return JSON.stringify([body.dataset.articleId,body.querySelector('#grade-form')?.dataset.id||'']);}
+function rememberAssistantViewport(body=$('.assistant-body')){
   if(!body||!(body.clientHeight>0))return;
+  if(body.dataset.mode==='quiz'){quizViews.set(quizViewportKey(body),body.scrollTop);return;}
   const view=chatView(body.dataset.articleId);
   view.top=body.scrollTop;view.follow=chatAtBottom(body);
 }
@@ -275,8 +276,9 @@ function reconcileChatReply(){
   view.key=key;
   if(assistantVisible()&&S.assistantTab==='chat'&&view.follow)view.unread=false;
 }
-function restoreChatViewport(){
-  const body=$('.assistant-body[data-mode="chat"]');
+function restoreAssistantViewport(){
+  const body=$('.assistant-body');
+  if(body?.dataset.mode==='quiz'){body.scrollTop=quizViews.get(quizViewportKey(body))||0;return;}
   if(body){const view=chatView(body.dataset.articleId);body.scrollTop=view.follow?body.scrollHeight:view.top;}
 }
 function persistReaderPreferences(){try{localStorage.setItem('between.reader',JSON.stringify(readerPreferences));}catch{/* Preferences still apply in this session. */}}
@@ -298,12 +300,12 @@ function openReadingAssistant({latest=false}={}){
   if(readerMobile)assistantSheetOpen=true;else{readerPreferences.focus=false;persistReaderPreferences();}
   if(latest){S.assistantTab='chat';render();chatView().follow=true;chatView().unread=false;}
   else syncReadingAssistant();
-  restoreChatViewport();
+  restoreAssistantViewport();
   if(S.assistantTab==='chat'&&chatView().follow)chatView().unread=false;
   updateReplyIndicators();
 }
 function closeReadingAssistant(){
-  rememberChatViewport();
+  rememberAssistantViewport();
   if(readerMobile)assistantSheetOpen=false;else{readerPreferences.focus=true;persistReaderPreferences();}
   syncReadingAssistant();$('#reader-assistant-toggle')?.focus({preventScroll:true});
 }
@@ -311,10 +313,11 @@ function revealSelection(){
   $('#selection-area').innerHTML=selectionMarkup();
   openReadingAssistant();
 }
-readerMedia?.addEventListener('change',event=>{rememberChatViewport();readerMobile=event.matches;assistantSheetOpen=false;if(S.nav==='reading'&&S.article)render();});
+readerMedia?.addEventListener('change',event=>{rememberAssistantViewport();readerMobile=event.matches;assistantSheetOpen=false;if(S.nav==='reading'&&S.article)render();});
 document.addEventListener('scroll',event=>{
-  const body=event.target;if(!body.matches?.('.assistant-body[data-mode="chat"]')||!(body.clientHeight>0))return;
-  const view=chatView(body.dataset.articleId);view.top=body.scrollTop;view.follow=chatAtBottom(body);
+  const body=event.target;if(!body.matches?.('.assistant-body')||!(body.clientHeight>0))return;
+  rememberAssistantViewport(body);if(body.dataset.mode!=='chat')return;
+  const view=chatView(body.dataset.articleId);
   if(view.follow&&view.unread){view.unread=false;updateReplyIndicators();}
 },true);
 document.addEventListener('cancel',event=>{if(event.target.id==='assistant-sheet'){event.preventDefault();closeReadingAssistant();}},true);
@@ -325,7 +328,8 @@ function readerPage() {
   const a=S.article, paragraphs=a.text.split(/\n\n+/).filter(Boolean);
   const items=[['chat','解释与提问'],['quiz','理解测试']];
   const assistantContent=`<div class="assistant-body" data-article-id="${esc(a.id)}" data-mode="${S.assistantTab}">${S.assistantTab==='chat'?chatBody():quizBody()}</div><button type="button" id="new-chat-reply" class="new-chat-reply light small" data-action="latest-reply" ${chatView().unread?'':'hidden'}>有新回复 ↓</button><div id="selection-area">${selectionMarkup()}</div>${S.assistantTab==='chat'?`<form class="composer" id="chat-form"><label><span class="sr-only">向阅读助手提问</span><textarea id="compose" placeholder="这句话为什么这样表达？" rows="2" maxlength="2000">${esc(S.compose)}</textarea></label><div class="row"><select id="reply-language" aria-label="讲解语言">${options(['中文','English'],S.language)}</select><button type="submit" class="primary" ${busy('explain')?'disabled':''}>${busy('explain')?'思考中…':'发送提问'}</button></div></form>`:''}`;
-  const assistant=`<aside id="reading-assistant" class="assistant-panel" aria-label="AI 学习助手"><div class="assistant-head"><div class="row spread"><h2 id="assistant-title">一起读懂</h2><button type="button" id="close-reading-assistant" class="ghost small" data-action="close-assistant" aria-label="${readerMobile?'关闭阅读助手':'收起阅读助手'}">${readerMobile?'收起':'收起助手'}</button></div>${tabsMarkup('assistant','阅读助手',items,S.assistantTab)}</div>${tabPanelsMarkup('assistant',items,S.assistantTab,assistantContent,'assistant-tabpanel')}</aside>`;
+  const feedback=readerMobile&&S.error?`<div id="assistant-feedback" class="hint-strip error-strip" role="alert"><span>${esc(S.error)}</span><button type="button" class="ghost small" data-action="dismiss-error">关闭</button></div>`:'';
+  const assistant=`<aside id="reading-assistant" class="assistant-panel" aria-label="AI 学习助手"><div class="assistant-head"><div class="row spread"><h2 id="assistant-title">一起读懂</h2><button type="button" id="close-reading-assistant" class="ghost small" data-action="close-assistant" aria-label="${readerMobile?'关闭阅读助手':'收起阅读助手'}">${readerMobile?'收起':'收起助手'}</button></div>${tabsMarkup('assistant','阅读助手',items,S.assistantTab)}</div>${feedback}${tabPanelsMarkup('assistant',items,S.assistantTab,assistantContent,'assistant-tabpanel')}</aside>`;
   return `<header class="page-head"><div class="row"><button class="ghost small" data-action="back-library">‹ 阅读书架</button><span class="badge neutral">${a.imported?'我的文章':'原文阅读'}</span></div><div class="row"><button class="ghost small" data-action="save-article" aria-pressed="${a.saved?'true':'false'}" data-id="${a.id}">${a.saved?'已收藏':'收藏文章'}</button><button class="small" data-action="import">导入文章</button></div></header><div class="reading-layout"><section class="reader reader-font-${readerPreferences.fontSize}" data-article-id="${esc(a.id)}" aria-label="英文原文"><div class="reader-toolbar"><div class="reader-font-controls" role="group" aria-label="正文字号"><button type="button" id="reader-font-smaller" class="ghost small" data-action="reader-font-smaller" aria-label="缩小正文字号" ${readerPreferences.fontSize===0?'disabled':''}>A−</button><span aria-live="polite">${['标准','大','更大'][readerPreferences.fontSize]}</span><button type="button" id="reader-font-larger" class="ghost small" data-action="reader-font-larger" aria-label="放大正文字号" ${readerPreferences.fontSize===2?'disabled':''}>A＋</button></div><button type="button" id="reader-assistant-toggle" class="light small" data-action="toggle-assistant" aria-controls="${readerMobile?'assistant-sheet':'reading-assistant'}" aria-expanded="${assistantVisible()}">${readerMobile?'阅读助手':readerPreferences.focus?'打开助手':'专注阅读'}</button></div><div class="reader-content"><span class="eyebrow">${esc(a.source || 'English reading')}</span><h1>${esc(a.title)}</h1><div class="article-meta">${a.level?`<span class="badge">${esc(a.level)} · 估计</span>`:''}<span>${a.wordCount} words</span><span>约 ${Math.max(1,Math.round(a.wordCount/130))} 分钟</span>${source(a.url,'查看原文')}</div>${a.filters && (a.wordCount<a.filters.minWords || a.wordCount>a.filters.maxWords)?'<div class="hint-strip">正文篇幅超出筛选范围。</div>':''}<span id="paragraph-help" class="sr-only">按 Enter 选中段落，也可以拖选具体句子。</span><div class="article-text" id="article-text" lang="en">${paragraphs.map((p,i)=>`<p data-paragraph="${i}" id="para-${i}" tabindex="0" aria-describedby="paragraph-help" title="点选这一段，或拖选具体句子">${esc(p)}</p>`).join('')}</div><div class="reader-end"><button class="light" data-action="finish-reading">${a.completed?'已读完 ✓':'标记读完'}</button></div></div></section>${readerMobile?`<dialog id="assistant-sheet" aria-labelledby="assistant-title">${assistant}</dialog>`:assistant}</div>`;
 }
 function selectionMarkup() { return S.selection?`<div class="selection-box"><div class="selection-label"><span>已选中原文</span><span><button class="ghost small" data-action="explain-selection" ${busy('explain')?'disabled':''}>解释</button>${S.selection.split(/\s+/).length<=6?`<button class="ghost small" data-action="save-selection" ${busy('word')?'disabled':''}>收藏生词</button>`:''}<button class="icon-button" data-action="clear-selection" aria-label="清除选中文字">×</button></span></div>${esc(S.selection)}</div>`:''; }

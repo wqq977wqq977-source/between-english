@@ -10,13 +10,16 @@ const [html, source] = await Promise.all([
   readFile(new URL('../public/app.js', import.meta.url), 'utf8')
 ]);
 const clone = value => JSON.parse(JSON.stringify(value));
-async function browser({ mobile = false, completedB = false, storage = new Map() } = {}) {
+async function browser({ mobile = false, completedB = false, withQuizzes = false, storage = new Map() } = {}) {
   const { window, document } = parseHTML(html), location = { hash: '#read/A' }, polls = [], calls = [];
   const articles = Object.fromEntries(['A', 'B'].map(id => [id, {
     id, title: `Article ${id}`, text: 'A planet follows an orbit.\n\nAn orbit is a path around another object.',
     wordCount: 14, hasText: true, paragraph: 0, completed: false, quizzes: [],
     messages: [{ id: `${id}-first`, role: 'assistant', text: `A previous answer for ${id}.` }]
   }]));
+  if(withQuizzes)for(const article of Object.values(articles))article.quizzes=[{
+    id:`${article.id}-quiz`,questions:Array.from({length:5},(_,i)=>({id:`${article.id}-question-${i}`,type:'short',question:`Explain point ${i+1}.`}))
+  }];
   if(completedB)Object.assign(articles.B,{completed:true,paragraph:1});
   const state = { token: 'fixture', words: [], decks: [], articles: Object.values(articles), jobs: [], memory: null,
     settings: { tutorProvider: 'codex' }, connection: { authenticated: true },
@@ -60,9 +63,12 @@ async function browser({ mobile = false, completedB = false, storage = new Map()
     async releaseVisit(){releaseVisit();await setImmediate();},
     async click(selector) { event(query(selector), 'click'); await setImmediate(); },
     async input(selector, value) { const el = query(selector); el.value = value; event(el, 'input'); await setImmediate(); },
+    async change(selector, value) { const el=query(selector);for(const option of el.options)option.selected=option.value===value;event(el,'change');await setImmediate(); },
+    async submitQuiz() { event(query('#quiz-form'), 'submit'); await setImmediate(); },
     async submitQuestion() { await this.input('#compose', 'Please explain the main point.'); event(query('#chat-form'), 'submit'); await setImmediate(); },
     scroll(top) { const body = query('.assistant-body'); body.scrollTop = top; event(body, 'scroll'); },
     async answer() { const id = state.jobs[0].params.articleId; articles[id].messages.push({ id: `${id}-${calls.length}`, role: 'assistant', text: 'A new reply.' }); Object.assign(state.jobs[0], { status: 'completed', result: { articleId: id } }); polls.shift()(); await setImmediate(); },
+    async newQuiz() { const id=state.jobs[0].params.articleId,quiz={id:`${id}-new-quiz`,questions:[{id:`${id}-new-question`,type:'short',question:'Explain the main idea.'}]};articles[id].quizzes.unshift(quiz);Object.assign(state.jobs[0],{status:'completed',result:{articleId:id,quizId:quiz.id}});polls.shift()();await setImmediate(); },
     async escape() { event(query('#assistant-sheet'), 'cancel'); await setImmediate(); }
   };
 }
@@ -82,6 +88,48 @@ test('new answers preserve an older reading position and can be opened explicitl
   const body = app.query('.assistant-body');
   assert.equal(body.scrollTop, body.scrollHeight - body.clientHeight);
   assert.equal(app.query('#new-chat-reply').hidden, true);
+});
+
+test('a background explanation preserves the current quiz question and its draft answer', async () => {
+  const app = await browser({ withQuizzes:true }); await app.submitQuestion();
+  await app.click('[data-assistant-tab="quiz"]');
+  await app.input('[data-answer="A-question-3"]', 'An orbit describes a path.'); app.scroll(380);
+  await app.answer();
+  assert.equal(app.query('.assistant-body').dataset.mode, 'quiz');
+  assert.equal(app.query('.assistant-body').scrollTop, 380);
+  assert.equal(app.query('[data-answer="A-question-3"]').value, 'An orbit describes a path.');
+  assert.equal(app.query('#new-chat-reply').hidden, false);
+});
+
+test('quiz positions survive tabs and rerenders without carrying over to another article', async () => {
+  const app=await browser({withQuizzes:true});app.scroll(75);
+  await app.click('[data-assistant-tab="quiz"]');assert.equal(app.query('.assistant-body').scrollTop,0);
+  app.scroll(380);await app.click('[data-action="reader-font-larger"]');
+  assert.equal(app.query('.assistant-body').scrollTop,380);
+  await app.click('[data-assistant-tab="chat"]');assert.equal(app.query('.assistant-body').scrollTop,75);
+  await app.click('[data-assistant-tab="quiz"]');assert.equal(app.query('.assistant-body').scrollTop,380);
+  await app.click('[data-action="back-library"]');await app.click('[data-action="open-article"][data-id="B"]');
+  await app.click('[data-assistant-tab="quiz"]');assert.equal(app.query('.assistant-body').scrollTop,0);app.scroll(130);
+  await app.click('[data-action="back-library"]');await app.click('[data-action="open-article"][data-id="A"]');
+  assert.equal(app.query('.assistant-body').dataset.mode,'quiz');assert.equal(app.query('.assistant-body').scrollTop,380);
+  await app.click('[data-action="back-library"]');await app.click('[data-action="open-article"][data-id="B"]');
+  assert.equal(app.query('.assistant-body').scrollTop,130);
+});
+
+test('a new quiz starts at the top while an earlier quiz keeps its place', async () => {
+  const app=await browser({withQuizzes:true});await app.click('[data-assistant-tab="quiz"]');app.scroll(380);
+  await app.submitQuiz();assert.equal(app.query('.assistant-body').scrollTop,380);
+  await app.newQuiz();assert.equal(app.query('#grade-form').dataset.id,'A-new-quiz');
+  assert.equal(app.query('.assistant-body').scrollTop,0);
+  await app.change('#quiz-picker','A-quiz');assert.equal(app.query('.assistant-body').scrollTop,380);
+  await app.change('#quiz-picker','A-new-quiz');assert.equal(app.query('.assistant-body').scrollTop,0);
+});
+
+test('selecting an article passage keeps the current quiz question in view', async () => {
+  const app=await browser({withQuizzes:true});await app.click('[data-assistant-tab="quiz"]');app.scroll(380);
+  await app.click('[data-paragraph="0"]');
+  assert.equal(app.query('.assistant-body').scrollTop,380);
+  assert.match(app.query('#selection-area').textContent,/A planet follows an orbit/);
 });
 
 test('chat position belongs to its article and survives returning from the shelf', async () => {
